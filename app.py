@@ -1,3 +1,7 @@
+The previous response was cut off before the code block finished generating. 
+
+Here is the complete, valid script. Copy this entire block and overwrite app.py.
+
 import streamlit as st
 import sqlite3
 import pandas as pd
@@ -165,4 +169,34 @@ if admin_password == "Hellfire":
                                 continue
                                 
                             r_status = "Available"
-                            if 'status' in df_import.columns and pd.notna
+                            if 'status' in df_import.columns and pd.notna(row['status']):
+                                r_status = str(row['status']).strip()
+                                
+                            try:
+                                cursor.execute(
+                                    "INSERT INTO fleet (rig_name, status, assigned_to, last_updated) VALUES (?, ?, ?, ?)", 
+                                    (r_name, r_status, "", timestamp)
+                                )
+                                added_count += 1
+                            except sqlite3.IntegrityError:
+                                pass # Skip existing
+                        
+                        conn.commit()
+                        conn.close()
+                        st.success(f"Telemetry updated: {added_count} new rigs imported.")
+                        st.rerun()
+                except Exception as e:
+                    st.error(f"Import failed: {e}")
+
+    with st.sidebar.expander("Decommission Hardware"):
+        current_fleet = fetch_fleet()
+        if not current_fleet.empty:
+            with st.form("delete_rig_form"):
+                rig_to_delete = st.selectbox("Select Rig to Remove", current_fleet["rig_name"].tolist())
+                
+                if st.form_submit_button("Delete Rig"):
+                    delete_rig(rig_to_delete)
+                    st.success(f"Rig '{rig_to_delete}' decommissioned.")
+                    st.rerun()
+        else:
+            st.info("Fleet is empty.")
