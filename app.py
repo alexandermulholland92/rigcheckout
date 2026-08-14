@@ -1,7 +1,3 @@
-Replace your app.py with this updated version. It introduces a bulk CSV import module within the admin panel. 
-
-The CSV must contain a rig_name column. An optional status column can be included; if omitted, it defaults to "Available". Duplicate rig names are automatically bypassed.
-
 import streamlit as st
 import sqlite3
 import pandas as pd
