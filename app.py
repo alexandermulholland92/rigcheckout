@@ -3,6 +3,16 @@ import pandas as pd
 import sqlite3
 from datetime import datetime
 
+# 1. Read the parameters from the URL
+query_params = st.query_params
+
+# 2. Check if the URL contains ?admin=secretkey
+if query_params.get("admin") == "Hellfire":
+    
+    # 3. Indent all your admin code here
+    st.header("Admin: Add new set to fleet")
+    # Your admin logic here
+
 # --- DATABASE SETUP ---
 DB_FILE = "inventory.db"
 
