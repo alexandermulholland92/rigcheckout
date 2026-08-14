@@ -5,9 +5,6 @@ from datetime import datetime
 
 DB_NAME = "inventory.db"
 
-==========================================
-1. DATABASE ORCHESTRATION
-==========================================
 def init_db():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
@@ -66,9 +63,6 @@ def delete_rig(rig_name):
 
 init_db()
 
-==========================================
-2. OPERATIONAL INTERFACE
-==========================================
 st.title("Rig Checkout List")
 
 tab_dash, tab_checkout, tab_return = st.tabs(["Dashboard", "Check Out", "Return"])
@@ -116,9 +110,6 @@ with tab_return:
     else:
         st.info("No hardware currently deployed.")
 
-==========================================
-3. GATED ADMIN MODULE
-==========================================
 st.sidebar.header("System Access")
 admin_password = st.sidebar.text_input("Admin Key", type="password")
 
@@ -126,7 +117,6 @@ if admin_password == "Hellfire":
     st.sidebar.divider()
     st.sidebar.subheader("Admin Controls")
     
-Provisioning Module
     with st.sidebar.expander("Provision Single Rig"):
         with st.form("add_rig_form", clear_on_submit=True):
             new_rig_name = st.text_input("Rig ID (e.g., Pumice-01)")
@@ -153,7 +143,6 @@ Provisioning Module
                 else:
                     st.warning("Rig ID is required.")
 
-Bulk Import Module
     with st.sidebar.expander("Bulk Import (CSV)"):
         st.caption("Requires a 'rig_name' column. Optional 'status' column.")
         uploaded_file = st.file_uploader("Upload CSV", type=["csv"])
@@ -176,35 +165,4 @@ Bulk Import Module
                                 continue
                                 
                             r_status = "Available"
-                            if 'status' in df_import.columns and pd.notna(row['status']):
-                                r_status = str(row['status']).strip()
-                                
-                            try:
-                                cursor.execute(
-                                    "INSERT INTO fleet (rig_name, status, assigned_to, last_updated) VALUES (?, ?, ?, ?)", 
-                                    (r_name, r_status, "", timestamp)
-                                )
-                                added_count += 1
-                            except sqlite3.IntegrityError:
-                                pass # Skip existing
-                        
-                        conn.commit()
-                        conn.close()
-                        st.success(f"Telemetry updated: {added_count} new rigs imported.")
-                        st.rerun()
-                except Exception as e:
-                    st.error(f"Import failed: {e}")
-                    
-Decommissioning Module
-    with st.sidebar.expander("Decommission Hardware"):
-        current_fleet = fetch_fleet()
-        if not current_fleet.empty:
-            with st.form("delete_rig_form"):
-                rig_to_delete = st.selectbox("Select Rig to Remove", current_fleet["rig_name"].tolist())
-                
-                if st.form_submit_button("Delete Rig"):
-                    delete_rig(rig_to_delete)
-                    st.success(f"Rig '{rig_to_delete}' decommissioned.")
-                    st.rerun()
-        else:
-            st.info("Fleet is empty.")
+                            if 'status' in df_import.columns and pd.notna
