@@ -1,140 +1,150 @@
 import streamlit as st
-import pandas as pd
 import sqlite3
+import pandas as pd
 from datetime import datetime
 
-# 1. Read the parameters from the URL
-query_params = st.query_params
+DB_NAME = "inventory.db"
 
-# 2. Check if the URL contains ?admin=secretkey
-if query_params.get("admin") == "Hellfire":
-    
-    # 3. Indent all your admin code here
-    st.header("Admin: Add new set to fleet")
-    # Your admin logic here
-
-# --- DATABASE SETUP ---
-DB_FILE = "inventory.db"
-
+# ==========================================
+# 1. DATABASE ORCHESTRATION
+# ==========================================
 def init_db():
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    # Create table if it doesn't exist, but do NOT insert any rows
-    c.execute('''CREATE TABLE IF NOT EXISTS sets 
-                 (id TEXT PRIMARY KEY, status TEXT, location TEXT, assignee TEXT, last_updated TEXT)''')
+    """Initializes the schema and runs migrations if columns are missing."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    
+    # 1. Ensure base table exists
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS fleet (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            rig_name TEXT UNIQUE,
+            status TEXT
+        )
+    ''')
+    
+    # 2. Inspect existing columns
+    cursor.execute("PRAGMA table_info(fleet)")
+    existing_columns = [col[1] for col in cursor.fetchall()]
+    
+    # 3. Migrate missing columns
+    if "assigned_to" not in existing_columns:
+        cursor.execute("ALTER TABLE fleet ADD COLUMN assigned_to TEXT DEFAULT ''")
+    if "last_updated" not in existing_columns:
+        cursor.execute("ALTER TABLE fleet ADD COLUMN last_updated TEXT DEFAULT ''")
+        
     conn.commit()
     conn.close()
 
-def get_data():
-    conn = sqlite3.connect(DB_FILE)
-    df = pd.read_sql_query("SELECT * FROM sets", conn)
+def fetch_fleet():
+    conn = sqlite3.connect(DB_NAME)
+    df = pd.read_sql_query("SELECT rig_name, status, assigned_to, last_updated FROM fleet", conn)
     conn.close()
     return df
 
-def update_set(set_id, status, location, assignee):
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute("UPDATE sets SET status=?, location=?, assignee=?, last_updated=? WHERE id=?",
-              (status, location, assignee, datetime.now().isoformat(), set_id))
+def get_rigs_by_status(status):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("SELECT rig_name FROM fleet WHERE status=?", (status,))
+    rigs = [row[0] for row in cursor.fetchall()]
+    conn.close()
+    return rigs
+
+def update_rig_state(rig_name, status, assignee):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    cursor.execute('''
+        UPDATE fleet 
+        SET status=?, assigned_to=?, last_updated=? 
+        WHERE rig_name=?
+    ''', (status, assignee, timestamp, rig_name))
     conn.commit()
     conn.close()
 
-# --- APP UI ---
-st.set_page_config(page_title="Set Tracker", layout="wide")
+# Execute schema check on startup
 init_db()
 
-st.title("📦 Logistics Control: Set Tracking")
-st.markdown("---")
+# ==========================================
+# 2. OPERATIONAL INTERFACE
+# ==========================================
+st.title("Pumice Hardware Telemetry")
 
-df = get_data()
+tab_dash, tab_checkout, tab_return = st.tabs(["Dashboard", "Check Out", "Return"])
 
-# Sidebar - Fleet Health
-st.sidebar.header("Fleet Metrics")
-if not df.empty:
-    st.sidebar.metric("Available", len(df[df['status'] == 'Available']))
-    st.sidebar.metric("Deployed", len(df[df['status'] == 'Deployed']))
-    st.sidebar.metric("Maintenance", len(df[df['status'] == 'Maintenance']))
-else:
-    st.sidebar.info("Inventory empty.")
-
-# Main Tabs
-tab1, tab2, tab3 = st.tabs(["Dashboard", "Check Out", "Check In / Maintenance"])
-
-with tab1:
-    st.subheader("Current Fleet Status")
-    if df.empty:
-        st.info("No hardware registered. Use the Admin section below to add sets.")
+with tab_dash:
+    st.subheader("Fleet Status")
+    fleet_data = fetch_fleet()
+    if fleet_data.empty:
+        st.info("Fleet uninitialized. Provision hardware via the Admin portal.")
     else:
-        # UPDATED: Search now includes Assignee
-        search = st.text_input("Search by Set ID, Location, or Assignee")
-        if search:
-            display_df = df[
-                df['id'].str.contains(search, case=False, na=False) | 
-                df['location'].str.contains(search, case=False, na=False) |
-                df['assignee'].str.contains(search, case=False, na=False)
-            ]
-        else:
-            display_df = df
-        st.dataframe(display_df, use_container_width=True, hide_index=True)
+        st.dataframe(fleet_data, use_container_width=True, hide_index=True)
 
-with tab2:
-    st.subheader("Deploy Equipment")
-    if not df.empty:
-        available = df[df['status'] == 'Available']['id'].tolist()
-        if not available:
-            st.warning("No sets currently available.")
-        else:
-            with st.form("checkout_form"):
-                selected_set = st.selectbox("Select Set ID", available)
-                dest = st.text_input("Destination Location")
-                user = st.text_input("Assignee")
-                submit = st.form_submit_button("Confirm Deployment")
-                
-                if submit:
-                    if dest and user:
-                        update_set(selected_set, "Deployed", dest, user)
-                        st.success(f"{selected_set} deployed to {dest}")
-                        st.rerun()
-                    else:
-                        st.error("Please fill in all fields.")
-    else:
-        st.info("Add hardware first.")
-
-with tab3:
-    st.subheader("Return or Flag Equipment")
-    if not df.empty:
-        deployed = df[df['status'] != 'Available']['id'].tolist()
-        if not deployed:
-            st.info("All sets are currently at Base.")
-        else:
-            with st.form("return_form"):
-                selected_return = st.selectbox("Select Set ID", deployed)
-                action = st.radio("Action", ["Return to Base (Available)", "Flag for Maintenance (T3/Hardware Issue)"])
-                submit_return = st.form_submit_button("Update Status")
-                
-                if submit_return:
-                    new_status = "Available" if "Return" in action else "Maintenance"
-                    update_set(selected_return, new_status, "Base", "None")
-                    st.success(f"{selected_return} updated to {new_status}")
+with tab_checkout:
+    st.subheader("Deploy Hardware")
+    available_rigs = get_rigs_by_status("Available")
+    
+    if available_rigs:
+        with st.form("checkout_form"):
+            selected_rig = st.selectbox("Select Rig", available_rigs)
+            assignee = st.text_input("Assignee Name (e.g., Roshaun, Daniel)")
+            
+            if st.form_submit_button("Check Out"):
+                if assignee.strip():
+                    update_rig_state(selected_rig, "Deployed", assignee.strip())
+                    st.success(f"Rig '{selected_rig}' deployed to {assignee}.")
                     st.rerun()
+                else:
+                    st.warning("Assignee name is required.")
     else:
-        st.info("Add hardware first.")
+        st.info("No hardware currently available for deployment.")
 
-# Admin Section - Add New Hardware
-st.markdown("---")
-with st.expander("Admin: Add New Set to Fleet"):
-    new_id = st.text_input("New Set ID (e.g., Pumice-V2.1-01)")
-    if st.button("Add to Inventory"):
-        if new_id:
-            if new_id not in df['id'].values:
-                conn = sqlite3.connect(DB_FILE)
-                c = conn.cursor()
-                c.execute("INSERT INTO sets VALUES (?, 'Available', 'Base', 'None', ?)", (new_id, datetime.now().isoformat()))
-                conn.commit()
-                conn.close()
-                st.success(f"Added {new_id} to fleet.")
+with tab_return:
+    st.subheader("Return Hardware")
+    deployed_rigs = get_rigs_by_status("Deployed")
+    
+    if deployed_rigs:
+        with st.form("return_form"):
+            return_rig = st.selectbox("Select Rig", deployed_rigs)
+            new_condition = st.selectbox("Return Condition", ["Available", "In Maintenance"])
+            
+            if st.form_submit_button("Process Return"):
+                update_rig_state(return_rig, new_condition, "")
+                st.success(f"Rig '{return_rig}' returned. Status updated to {new_condition}.")
                 st.rerun()
+    else:
+        st.info("No hardware currently deployed.")
+
+# ==========================================
+# 3. GATED ADMIN MODULE
+# ==========================================
+st.sidebar.header("System Access")
+admin_password = st.sidebar.text_input("Admin Key", type="password")
+
+if admin_password == "PumiceAdmin":
+    st.sidebar.divider()
+    st.sidebar.subheader("Provision New Hardware")
+    
+    with st.sidebar.form("add_rig_form", clear_on_submit=True):
+        new_rig_name = st.text_input("Rig ID (e.g., Pumice-01)")
+        new_status = st.selectbox("Initial Status", ["Available", "In Maintenance", "Deployed"])
+        
+        if st.form_submit_button("Add to Fleet"):
+            if new_rig_name.strip():
+                try:
+                    conn = sqlite3.connect(DB_NAME)
+                    cursor = conn.cursor()
+                    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    
+                    cursor.execute(
+                        "INSERT INTO fleet (rig_name, status, assigned_to, last_updated) VALUES (?, ?, ?, ?)", 
+                        (new_rig_name.strip(), new_status, "", timestamp)
+                    )
+                    conn.commit()
+                    st.sidebar.success(f"Rig '{new_rig_name}' provisioned.")
+                    st.rerun()
+                except sqlite3.IntegrityError:
+                    st.sidebar.error("Execution halted: Rig ID already exists.")
+                finally:
+                    conn.close()
             else:
-                st.error("Set ID already exists.")
-        else:
-            st.error("Please enter an ID.")
+                st.sidebar.warning("Rig ID is required.")
