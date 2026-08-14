@@ -9,11 +9,9 @@ DB_NAME = "inventory.db"
 # 1. DATABASE ORCHESTRATION
 # ==========================================
 def init_db():
-    """Initializes the schema and runs migrations if columns are missing."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     
-    # 1. Ensure base table exists
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS fleet (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -22,11 +20,9 @@ def init_db():
         )
     ''')
     
-    # 2. Inspect existing columns
     cursor.execute("PRAGMA table_info(fleet)")
     existing_columns = [col[1] for col in cursor.fetchall()]
     
-    # 3. Migrate missing columns
     if "assigned_to" not in existing_columns:
         cursor.execute("ALTER TABLE fleet ADD COLUMN assigned_to TEXT DEFAULT ''")
     if "last_updated" not in existing_columns:
@@ -61,7 +57,13 @@ def update_rig_state(rig_name, status, assignee):
     conn.commit()
     conn.close()
 
-# Execute schema check on startup
+def delete_rig(rig_name):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM fleet WHERE rig_name=?", (rig_name,))
+    conn.commit()
+    conn.close()
+
 init_db()
 
 # ==========================================
@@ -122,8 +124,9 @@ admin_password = st.sidebar.text_input("Admin Key", type="password")
 
 if admin_password == "Hellfire":
     st.sidebar.divider()
-    st.sidebar.subheader("Provision New Hardware")
     
+    # Provisioning Module
+    st.sidebar.subheader("Provision Hardware")
     with st.sidebar.form("add_rig_form", clear_on_submit=True):
         new_rig_name = st.text_input("Rig ID (e.g., Pumice-01)")
         new_status = st.selectbox("Initial Status", ["Available", "In Maintenance", "Deployed"])
@@ -148,3 +151,20 @@ if admin_password == "Hellfire":
                     conn.close()
             else:
                 st.sidebar.warning("Rig ID is required.")
+                
+    st.sidebar.divider()
+    
+    # Decommissioning Module
+    st.sidebar.subheader("Decommission Hardware")
+    current_fleet = fetch_fleet()
+    
+    if not current_fleet.empty:
+        with st.sidebar.form("delete_rig_form"):
+            rig_to_delete = st.selectbox("Select Rig to Remove", current_fleet["rig_name"].tolist())
+            
+            if st.form_submit_button("Delete Rig"):
+                delete_rig(rig_to_delete)
+                st.sidebar.success(f"Rig '{rig_to_delete}' decommissioned.")
+                st.rerun()
+    else:
+        st.sidebar.info("Fleet is empty.")
