@@ -1,7 +1,3 @@
-The previous response was cut off before the code block finished generating. 
-
-Here is the complete, valid script. Copy this entire block and overwrite app.py.
-
 import streamlit as st
 import sqlite3
 import pandas as pd
