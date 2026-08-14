@@ -69,7 +69,7 @@ init_db()
 # ==========================================
 # 2. OPERATIONAL INTERFACE
 # ==========================================
-st.title("Pumice Hardware Telemetry")
+st.title("Rig Checkout and Return")
 
 tab_dash, tab_checkout, tab_return = st.tabs(["Dashboard", "Check Out", "Return"])
 
