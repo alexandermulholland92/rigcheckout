@@ -291,4 +291,3 @@ with tab_return:
                 st.rerun()
     else:
         st.info("No hardware currently deployed.")
-```
