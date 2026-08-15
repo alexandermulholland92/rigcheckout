@@ -3,7 +3,7 @@ import sqlite3
 import pandas as pd
 from datetime import datetime
 
---- CONFIGURATION ---
+# --- CONFIGURATION ---
 st.set_page_config(page_title="Rig Checkout System", layout="wide")
 DB_NAME = "inventory.db"
 
@@ -75,7 +75,7 @@ init_db()
 
 st.title("Rig Checkout List")
 
---- ADMIN AUTHENTICATION ---
+# --- ADMIN AUTHENTICATION ---
 st.sidebar.header("System Access")
 admin_key = st.sidebar.text_input("Admin Key", type="password")
 is_admin = (admin_key == "Hellfire")
@@ -84,7 +84,7 @@ if is_admin:
     st.sidebar.divider()
     st.sidebar.subheader("Admin Controls")
     
-1. Add Single Rig
+# 1. Add Single Rig
     with st.sidebar.expander("Add Single Rig"):
         new_rig = st.text_input("New Rig Name")
         if st.button("Add Rig"):
@@ -101,7 +101,7 @@ if is_admin:
             else:
                 st.sidebar.warning("Please enter a rig name.")
 
-2. Delete Rig
+# 2. Delete Rig
     with st.sidebar.expander("Delete Rig"):
         conn = sqlite3.connect(DB_NAME)
         all_rigs = [r[0] for r in conn.execute("SELECT rig_name FROM fleet ORDER BY rig_name").fetchall()]
@@ -119,7 +119,7 @@ if is_admin:
         else:
             st.sidebar.info("No rigs in database.")
     
-3. Bulk Import CSV
+# 3. Bulk Import CSV
     with st.sidebar.expander("Bulk Import CSV"):
         up = st.file_uploader("Upload CSV Sheet", type=["csv"])
         if up and st.button("Process Import"):
@@ -177,7 +177,7 @@ if is_admin:
             st.sidebar.success(f"Successfully imported/updated {added_count} rigs.")
             st.rerun()
 
---- MAIN TABS ---
+# --- MAIN TABS ---
 tab_checkout, tab_dash, tab_return = st.tabs(["Check Out", "Dashboard", "Return"])
 
 with tab_checkout:
@@ -289,14 +289,12 @@ Show full dataframe editor
             
 Check if admin made changes
             if not display_df.equals(edited_df):
-Map column names back to database schema
                 rev_columns = {v: k for k, v in COLUMNS.items()}
                 edited_db_df = edited_df.rename(columns=rev_columns)
                 
                 for i, row in edited_db_df.iterrows():
                     orig_row = fleet_data.iloc[i]
                     if not row.equals(orig_row):
-Extract only the changed data for the payload
                         update_payload = row.drop(["rig_name", "last_updated"]).to_dict()
                         update_rig_state(row['rig_name'], update_payload)
                         
@@ -307,4 +305,26 @@ Standard User View (Read-Only)
             display_df = fleet_data.rename(columns=COLUMNS)
             st.dataframe(display_df, use_container_width=True, hide_index=True)
 
-with tab
+with tab_return:
+    st.subheader("Return Hardware")
+    conn = sqlite3.connect(DB_NAME)
+    deployed_rigs = [r[0] for r in conn.execute("SELECT rig_name FROM fleet WHERE status!='Available'").fetchall()]
+    conn.close()
+    
+    if deployed_rigs:
+        with st.form("return_form"):
+            return_rig = st.selectbox("Select Rig to Return", deployed_rigs)
+            new_status = st.selectbox("Condition", ["Available", "Needs Servicing"])
+            return_notes = st.text_area("Return Notes / Damage Report (if any)")
+            
+            if st.form_submit_button("Process Return"):
+Reset all fields to default empty strings except status and damage notes
+                reset_payload = {k: "" for k in COLUMNS.keys() if k not in ["rig_name", "status", "last_updated", "damage_notes"]}
+                reset_payload["status"] = new_status
+                reset_payload["damage_notes"] = return_notes
+                
+                update_rig_state(return_rig, reset_payload)
+                st.success(f"{return_rig} returned and marked as {new_status}.")
+                st.rerun()
+    else:
+        st.info("No rigs currently deployed.")
