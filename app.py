@@ -7,10 +7,10 @@ from datetime import datetime
 st.set_page_config(page_title="Rig Checkout System", layout="wide")
 DB_NAME = "inventory.db"
 
-config = {}
+# config = {}
 # Get all column names starting from index 9 (the 10th column, since index starts at 0)
 # Adjust the `9` if you meant the literal 9th column (which is index 8)
-cols_to_change = df.columns[9:] 
+# cols_to_change = df.columns[9:] 
 
 for col in cols_to_change:
     # Skip the damage notes column
