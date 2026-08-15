@@ -1,5 +1,3 @@
-My apologies for the cutoff. Here is the complete, uninterrupted script from top to bottom, including the finished tab_dash logic and the complete tab_return section.
-
 import streamlit as st
 import sqlite3
 import pandas as pd
