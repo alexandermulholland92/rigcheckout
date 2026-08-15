@@ -1,7 +1,3 @@
-The code was truncated in my previous output, cutting off the logic for the Return tab. 
-
-Here is the complete, uncut script. Replace the entire contents of app.py with this:
-
 import streamlit as st
 import sqlite3
 import pandas as pd
