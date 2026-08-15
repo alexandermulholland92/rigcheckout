@@ -3,8 +3,6 @@ import sqlite3
 import pandas as pd
 from datetime import datetime
 
-# --- CONFIGURATION ---
-st.set_page_config(page_title="Rig Checkout System", layout="wide")
 DB_NAME = "inventory.db"
 
 # Define the full schema based on the CSV headers
@@ -22,191 +20,271 @@ COLUMNS = {
     "batteries_charged": "Batteries Charged",
     "hotspot_connect": "Hotspot Ready",
     "test_recording": "Test Recording Done",
-    "servsafe_card": "ServSafe Card"
+    "servsafe_card": "ServSafe Card",
+    "sexual_harassment_training": "Harassment Training",
+    "workplace_violence_training": "Violence Training",
+    "damage_notes": "Damage Notes",
+    "home_wifi": "Home WiFi",
+    "overnight_charge": "Overnight Charge"
 }
 
 def init_db():
-    """Initialize the SQLite database and create the table if it doesn't exist."""
     conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS rigs (
-            rig_name TEXT PRIMARY KEY,
-            status TEXT,
-            assigned_to TEXT,
-            location TEXT,
-            last_updated TEXT,
-            address TEXT,
-            shift_lead TEXT,
-            lead_number TEXT,
-            wifi_configured BOOLEAN,
-            clothing_shoes BOOLEAN,
-            batteries_charged BOOLEAN,
-            hotspot_connect BOOLEAN,
-            test_recording BOOLEAN,
-            servsafe_card BOOLEAN
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS fleet (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            rig_name TEXT UNIQUE,
+            status TEXT DEFAULT 'Available'
         )
     ''')
     
-    # Seed initial data if the table is empty
-    c.execute("SELECT COUNT(*) FROM rigs")
-    if c.fetchone()[0] == 0:
-        default_rigs = [f"Pumice V2.1 - Rig {i}" for i in range(1, 11)]
-        for rig in default_rigs:
-            c.execute("INSERT INTO rigs (rig_name, status) VALUES (?, 'Available')", (rig,))
+    cursor.execute("PRAGMA table_info(fleet)")
+    existing = [col[1] for col in cursor.fetchall()]
+    
+    for col_id in COLUMNS.keys():
+        if col_id not in existing and col_id != "id":
+            cursor.execute(f"ALTER TABLE fleet ADD COLUMN {col_id} TEXT DEFAULT ''")
             
     conn.commit()
     conn.close()
 
-def get_data():
-    """Retrieve all rig data from the database."""
+def fetch_fleet():
     conn = sqlite3.connect(DB_NAME)
-    df = pd.read_sql_query("SELECT * FROM rigs", conn)
+    query = f"SELECT {', '.join(COLUMNS.keys())} FROM fleet"
+    df = pd.read_sql_query(query, conn)
     conn.close()
     return df
 
-def update_rig(rig_name, data):
-    """Update a specific rig's record in the database."""
+def update_rig_state(rig_name, data_dict):
     conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
+    cursor = conn.cursor()
+    data_dict["last_updated"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
-    set_clause = ", ".join([f"{k} = ?" for k in data.keys()])
-    values = list(data.values())
+    placeholders = ", ".join([f"{k}=?" for k in data_dict.keys()])
+    values = list(data_dict.values())
     values.append(rig_name)
     
-    c.execute(f"UPDATE rigs SET {set_clause} WHERE rig_name = ?", values)
+    cursor.execute(f"UPDATE fleet SET {placeholders} WHERE rig_name=?", values)
     conn.commit()
     conn.close()
 
-def main():
-    init_db()
+init_db()
+
+st.title("Rig Checkout List")
+
+# --- ADMIN AUTHENTICATION ---
+st.sidebar.header("System Access")
+admin_key = st.sidebar.text_input("Admin Key", type="password")
+is_admin = (admin_key == "Hellfire")
+
+if is_admin:
+    st.sidebar.divider()
+    st.sidebar.subheader("Admin Controls")
     
-    st.title("Pumice V2.1 Rig Checkout System")
-    st.markdown("Automated checkout and tracking for field operations.")
-    
-    menu = ["Dashboard", "Checkout Rig", "Check-in Rig"]
-    choice = st.sidebar.selectbox("Navigation", menu)
-    
-    df = get_data()
-    
-    if choice == "Dashboard":
-        st.subheader("Current Rig Status")
-        
-        # Display metrics
-        total_rigs = len(df)
-        checked_out = len(df[df['status'] == 'Checked Out'])
-        available = total_rigs - checked_out
-        
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Total Rigs", total_rigs)
-        col2.metric("Available", available)
-        col3.metric("Deployed", checked_out)
-        
-        st.divider()
-        
-        # Display dataframe
-        display_df = df.rename(columns=COLUMNS)
-        st.dataframe(display_df, use_container_width=True, hide_index=True)
-        
-    elif choice == "Checkout Rig":
-        st.subheader("Deploy a Rig")
-        available_rigs = df[df['status'] != 'Checked Out']['rig_name'].tolist()
-        
-        if not available_rigs:
-            st.warning("No rigs are currently available for checkout.")
-            return
+    with st.sidebar.expander("Bulk Import CSV"):
+        up = st.file_uploader("Upload CSV Sheet", type=["csv"])
+        if up and st.button("Process Import"):
+            df_in = pd.read_csv(up)
+            df_in = df_in.loc[:, ~df_in.columns.duplicated()]
             
+            conn = sqlite3.connect(DB_NAME)
+            cursor = conn.cursor()
+            
+            added_count = 0
+            for _, row in df_in.iterrows():
+                r_name = str(row.get('Rig Name', '')).strip()
+                if not r_name or r_name.lower() == 'nan':
+                    continue
+                
+                def get_val(col_name):
+                    val = row.get(col_name, "")
+                    return str(val).strip() if pd.notna(val) else ""
+
+                try:
+                    cursor.execute('''
+                        INSERT OR REPLACE INTO fleet (
+                            rig_name, status, assigned_to, location, address, shift_lead, lead_number,
+                            wifi_configured, clothing_shoes, batteries_charged, hotspot_connect,
+                            test_recording, servsafe_card, sexual_harassment_training,
+                            workplace_violence_training, damage_notes, home_wifi, overnight_charge
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (
+                        r_name,
+                        "Deployed",
+                        get_val('Column 1'),
+                        get_val('Off-Site Location Name'),
+                        get_val('Off-Stie Location Address'),
+                        get_val("Off-Site Coordinating Shift Lead's Name"),
+                        get_val("Off-Site Coordinating Shift Lead's Number"),
+                        get_val('Is your rig configured to the off-site Wi-Fi?'),
+                        get_val('Do you have appropriate clothing and shoes?'),
+                        get_val('2 batteries (including in rig)- fully charged?'),
+                        get_val('Are you able to connect on hotspot?'),
+                        get_val('Have you run a test recording on hotspot  (30 seconds)?'),
+                        get_val("Do you have a ServSafe food handler's card?"),
+                        get_val('Have you completed sexual harassment training?'),
+                        get_val('Have you completed workplace violence training?'),
+                        get_val('Is there any damage to the rig and if so what is it?'),
+                        get_val('Do you have reliable WiFi/Ethernet at home?'),
+                        get_val('Can you plug in your rig to charge and upload overnight?')
+                    ))
+                    added_count += 1
+                except Exception as e:
+                    st.sidebar.error(f"Error importing {r_name}: {e}")
+                    continue
+                    
+            conn.commit()
+            conn.close()
+            st.sidebar.success(f"Successfully imported/updated {added_count} rigs.")
+            st.rerun()
+
+# --- MAIN TABS ---
+tab_checkout, tab_dash, tab_return = st.tabs(["Check Out", "Dashboard", "Return"])
+
+with tab_checkout:
+    st.subheader("Deploy Hardware")
+    conn = sqlite3.connect(DB_NAME)
+    available_rigs = [r[0] for r in conn.execute("SELECT rig_name FROM fleet WHERE status='Available'").fetchall()]
+    conn.close()
+    
+    if available_rigs:
         with st.form("checkout_form"):
-            rig_name = st.selectbox("Select Rig", available_rigs)
+            selected_rig = st.selectbox("Select Rig", available_rigs)
             
-            st.write("### Assignment Details")
             col1, col2 = st.columns(2)
             with col1:
-                assigned_to = st.text_input("Assigned To (Data Collector)")
-                location = st.text_input("Location (e.g., Sports, Agriculture, Auto)")
-                address = st.text_input("Specific Address")
+                assignee = st.text_input("Assignee Name")
+                loc = st.text_input("Off-Site Location Name")
+                addr = st.text_input("Off-Site Location Address")
             with col2:
-                shift_lead = st.text_input("Shift Lead")
-                lead_number = st.text_input("Lead Contact Number")
-            
-            st.write("### Pre-Deployment Checklist")
-            st.caption("All items must be verified before deployment.")
-            
-            chk_col1, chk_col2 = st.columns(2)
-            with chk_col1:
-                wifi_configured = st.checkbox("Wi-Fi Configured")
-                clothing_shoes = st.checkbox("Appropriate Gear Verified")
-                batteries_charged = st.checkbox("Batteries Fully Charged")
-            with chk_col2:
-                hotspot_connect = st.checkbox("Hotspot Ready & Connected")
-                test_recording = st.checkbox("Test Recording Successful")
-                servsafe_card = st.checkbox("ServSafe Card (If applicable)")
+                lead = st.text_input("Shift Lead's Name")
+                lead_num = st.text_input("Shift Lead's Number")
                 
-            submit = st.form_submit_button("Complete Checkout")
+            st.write("---")
+            st.caption("Safety & Technical Checklist")
             
-            if submit:
-                if not assigned_to or not location:
-                    st.error("Error: 'Assigned To' and 'Location' are required fields.")
-                else:
-                    update_data = {
-                        "status": "Checked Out",
-                        "assigned_to": assigned_to,
-                        "location": location,
-                        "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                        "address": address,
-                        "shift_lead": shift_lead,
-                        "lead_number": lead_number,
-                        "wifi_configured": wifi_configured,
-                        "clothing_shoes": clothing_shoes,
-                        "batteries_charged": batteries_charged,
-                        "hotspot_connect": hotspot_connect,
-                        "test_recording": test_recording,
-                        "servsafe_card": servsafe_card
-                    }
-                    update_rig(rig_name, update_data)
-                    st.success(f"{rig_name} successfully checked out to {assigned_to}!")
-                    st.rerun()
-                    
-    elif choice == "Check-in Rig":
-        st.subheader("Return a Rig")
-        checked_out_rigs = df[df['status'] == 'Checked Out']['rig_name'].tolist()
-        
-        if not checked_out_rigs:
-            st.info("All rigs are currently in the lab.")
-            return
+            c1, c2, c3 = st.columns(3)
+            wifi = c1.selectbox("Configured to off-site Wi-Fi?", ["Yes", "No"])
+            gear = c2.selectbox("Appropriate clothing/shoes?", ["Yes", "No"])
+            batt = c3.selectbox("2 batteries fully charged?", ["Yes", "No"])
             
-        with st.form("checkin_form"):
-            rig_name = st.selectbox("Select Rig to Return", checked_out_rigs)
+            hotspot = c1.selectbox("Able to connect on hotspot?", ["Yes", "No"])
+            test_rec = c2.selectbox("Run test recording (30s)?", ["Yes", "No"])
+            servsafe = c3.selectbox("ServSafe food handler's card?", ["Yes", "No"])
             
-            st.write("### Post-Deployment Verification")
-            data_uploaded = st.checkbox("RoboCaps Data Uploaded & Verified")
-            hardware_intact = st.checkbox("Hardware Inspected & Intact")
+            harass = c1.selectbox("Completed sexual harassment training?", ["Yes", "No"])
+            violence = c2.selectbox("Completed workplace violence training?", ["Yes", "No"])
+            home_wifi = c3.selectbox("Reliable WiFi/Ethernet at home?", ["Yes", "No"])
             
-            submit = st.form_submit_button("Complete Check-in")
+            overnight = c1.selectbox("Can charge/upload overnight?", ["Yes", "No"])
+            damage = c2.selectbox("Is there any damage to the rig?", ["No", "Yes"])
             
-            if submit:
-                if not (data_uploaded and hardware_intact):
-                    st.warning("Please verify data upload and hardware integrity before checking in.")
-                else:
-                    # Reset all fields to default for the next user
-                    update_data = {
-                        "status": "Available",
-                        "assigned_to": "",
-                        "location": "",
-                        "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                        "address": "",
-                        "shift_lead": "",
-                        "lead_number": "",
-                        "wifi_configured": False,
-                        "clothing_shoes": False,
-                        "batteries_charged": False,
-                        "hotspot_connect": False,
-                        "test_recording": False,
-                        "servsafe_card": False
-                    }
-                    update_rig(rig_name, update_data)
-                    st.success(f"{rig_name} successfully checked in and is now available!")
-                    st.rerun()
+            if st.form_submit_button("Check Out"):
+                payload = {
+                    "status": "Deployed",
+                    "assigned_to": assignee,
+                    "location": loc,
+                    "address": addr,
+                    "shift_lead": lead,
+                    "lead_number": lead_num,
+                    "damage_notes": damage,
+                    "wifi_configured": wifi,
+                    "clothing_shoes": gear,
+                    "batteries_charged": batt,
+                    "hotspot_connect": hotspot,
+                    "test_recording": test_rec,
+                    "servsafe_card": servsafe,
+                    "sexual_harassment_training": harass,
+                    "workplace_violence_training": violence,
+                    "home_wifi": home_wifi,
+                    "overnight_charge": overnight
+                }
+                update_rig_state(selected_rig, payload)
+                st.success(f"{selected_rig} deployed to {assignee}.")
+                st.rerun()
+    else:
+        st.info("No rigs currently available.")
 
-if __name__ == "__main__":
-    main()
+with tab_dash:
+    st.subheader("Fleet Status")
+    fleet_data = fetch_fleet()
+    
+    if fleet_data.empty:
+        st.info("Fleet uninitialized. Provision hardware via the Admin portal.")
+    else:
+        if is_admin:
+            st.info("Admin Mode Active: All fields are editable.")
+            # Rename columns to human-readable format for the editor
+            display_df = fleet_data.rename(columns=COLUMNS)
+            
+            # Show full dataframe editor
+            edited_df = st.data_editor(
+                display_df,
+                use_container_width=True,
+                hide_index=True,
+                disabled=["Rig Name", "Last Updated"] # Prevent changing primary key and auto-timestamp
+            )
+            
+            # Check if admin made changes
+            if not display_df.equals(edited_df):
+                # Map column names back to database schema
+                rev_columns = {v: k for k, v in COLUMNS.items()}
+                edited_db_df = edited_df.rename(columns=rev_columns)
+                
+                for i, row in edited_db_df.iterrows():
+                    orig_row = fleet_data.iloc[i]
+                    if not row.equals(orig_row):
+                        # Extract only the changed data for the payload
+                        update_payload = row.drop(["rig_name", "last_updated"]).to_dict()
+                        update_rig_state(row['rig_name'], update_payload)
+                        
+                st.success("Database updated successfully!")
+                st.rerun()
+                
+        else:
+            # Standard User View
+            core_cols = ["rig_name", "status", "assigned_to"]
+            
+            st.dataframe(
+                fleet_data[core_cols].rename(columns={"rig_name": "Rig Name", "status": "Status", "assigned_to": "Assigned To"}),
+                use_container_width=True,
+                hide_index=True
+            )
+
+with tab_return:
+    st.subheader("Return Hardware")
+    conn = sqlite3.connect(DB_NAME)
+    deployed_rigs = [r[0] for r in conn.execute("SELECT rig_name FROM fleet WHERE status='Deployed'").fetchall()]
+    conn.close()
+    
+    if deployed_rigs:
+        with st.form("return_form"):
+            return_rig = st.selectbox("Select Rig to Return", deployed_rigs)
+            return_notes = st.text_area("Return Notes / Damage Report (Optional)")
+            
+            if st.form_submit_button("Process Return"):
+                payload = {
+                    "status": "Available",
+                    "assigned_to": "",
+                    "location": "",
+                    "address": "",
+                    "shift_lead": "",
+                    "lead_number": "",
+                    "damage_notes": return_notes,
+                    "wifi_configured": "",
+                    "clothing_shoes": "",
+                    "batteries_charged": "",
+                    "hotspot_connect": "",
+                    "test_recording": "",
+                    "servsafe_card": "",
+                    "sexual_harassment_training": "",
+                    "workplace_violence_training": "",
+                    "home_wifi": "",
+                    "overnight_charge": ""
+                }
+                update_rig_state(return_rig, payload)
+                st.success(f"{return_rig} has been returned and is now Available.")
+                st.rerun()
+    else:
+        st.info("No rigs are currently deployed.")
