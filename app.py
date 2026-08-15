@@ -298,7 +298,7 @@ with tab_return:
     else:
         st.info("No rigs are currently deployed.")            rig_name TEXT UNIQUE,
             status TEXT DEFAULT 'Available'
-        )
+        
     ''')
     
     cursor.execute("PRAGMA table_info(fleet)")
