@@ -205,7 +205,7 @@ else:
             update_rig_state(selected_rig, update_data)
             st.success(f"Successfully updated {selected_rig}!")
             st.rerun()
-   st.info("No rigs currently available.")
+            st.info("No rigs currently available.")
 
 with tab_dash:
     st.subheader("Fleet Status")
