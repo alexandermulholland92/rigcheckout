@@ -303,7 +303,6 @@ with tab_dash:
             # Define the exact columns and order for non-admins
             # This makes Location first and drops Location Address and everything after Last Updated
             visible_columns = [
-                "Location", 
                 "Rig Name", 
                 "Status", 
                 "Assigned To", 
