@@ -332,10 +332,10 @@ with tab_dash:
     else:
         if is_admin:
             st.info("Admin Mode Active: All fields are editable.")
-Rename columns to human-readable format for the editor
+# Rename columns to human-readable format for the editor
             display_df = fleet_data.rename(columns=COLUMNS)
             
-Setup column configuration dynamically
+# Setup column configuration dynamically
             editor_config = {
                 "Status": st.column_config.SelectboxColumn(
                     "Status",
@@ -345,7 +345,7 @@ Setup column configuration dynamically
                 )
             }
             
-Add Yes/No dropdowns for checklist items
+# Add Yes/No dropdowns for checklist items
             checklist_cols = [
                 "Wi-Fi Configured", "Appropriate Gear", "Batteries Charged", 
                 "Hotspot Ready", "Test Recording Done", "ServSafe Card", 
@@ -357,7 +357,7 @@ Add Yes/No dropdowns for checklist items
                     options=["Yes", "No", ""]
                 )
 
-Show full dataframe editor
+# Show full dataframe editor
             edited_df = st.data_editor(
                 display_df,
                 use_container_width=True,
@@ -366,7 +366,7 @@ Show full dataframe editor
                 column_config=editor_config
             )
             
-Check if admin made changes
+# Check if admin made changes
             if not display_df.equals(edited_df):
                 rev_columns = {v: k for k, v in COLUMNS.items()}
                 edited_db_df = edited_df.rename(columns=rev_columns)
@@ -380,7 +380,7 @@ Check if admin made changes
                 st.success("Database updated successfully!")
                 st.rerun()
         else:
-Standard User View (Read-Only)
+# Standard User View (Read-Only)
             display_df = fleet_data.rename(columns=COLUMNS)
             st.dataframe(display_df, use_container_width=True, hide_index=True)
 
@@ -397,7 +397,7 @@ with tab_return:
             return_notes = st.text_area("Return Notes / Damage Report (if any)")
             
             if st.form_submit_button("Process Return"):
-Reset all fields to default empty strings except status and damage notes
+# Reset all fields to default empty strings except status and damage notes
                 reset_payload = {k: "" for k in COLUMNS.keys() if k not in ["rig_name", "status", "last_updated", "damage_notes"]}
                 reset_payload["status"] = new_status
                 reset_payload["damage_notes"] = return_notes
