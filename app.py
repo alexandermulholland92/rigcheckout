@@ -70,10 +70,41 @@ tab_dash, tab_checkout, tab_return = st.tabs(["Dashboard", "Check Out", "Return"
 with tab_dash:
     st.subheader("Fleet Status")
     fleet_data = fetch_fleet()
+    
     if fleet_data.empty:
         st.info("Fleet uninitialized. Provision hardware via the Admin portal.")
     else:
-        st.dataframe(fleet_data, use_container_width=True, hide_index=True)
+        # Use st.data_editor instead of st.dataframe for interactive cells
+        edited_df = st.data_editor(
+            fleet_data,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "rig_name": st.column_config.TextColumn("Rig Name", disabled=True),
+                "status": st.column_config.SelectboxColumn(
+                    "Status",
+                    help="Click to change rig status",
+                    options=["Available", "Deployed", "In Maintenance", "Out of Service", "Servicing"],
+                    required=True,
+                ),
+                "assigned_to": st.column_config.TextColumn("Assigned To", disabled=True),
+                "last_updated": st.column_config.TextColumn("Last Updated", disabled=True),
+            }
+        )
+        
+        # Detect if the status was changed in the UI and update the database
+        if not fleet_data.equals(edited_df):
+            changed_rows = edited_df[edited_df['status'] != fleet_data['status']]
+            for _, row in changed_rows.iterrows():
+                # If changing to a non-deployed state, we can optionally clear the assignee
+                assignee = row['assigned_to']
+                if row['status'] in ["Available", "In Maintenance", "Out of Service", "Servicing"]:
+                    assignee = "" 
+                    
+                update_rig_state(row['rig_name'], row['status'], assignee)
+            
+            st.success("Database updated successfully!")
+            st.rerun()
 
 with tab_checkout:
     st.subheader("Deploy Hardware")
@@ -101,7 +132,7 @@ with tab_return:
     if deployed_rigs:
         with st.form("return_form"):
             return_rig = st.selectbox("Select Rig", deployed_rigs)
-            new_condition = st.selectbox("Return Condition", ["Available", "In Maintenance"])
+            new_condition = st.selectbox("Return Condition", ["Available", "In Maintenance", "Out of Service", "Servicing"])
             
             if st.form_submit_button("Process Return"):
                 update_rig_state(return_rig, new_condition, "")
@@ -120,7 +151,7 @@ if admin_password == "Hellfire":
     with st.sidebar.expander("Provision Single Rig"):
         with st.form("add_rig_form", clear_on_submit=True):
             new_rig_name = st.text_input("Rig ID (e.g., Pumice-01)")
-            new_status = st.selectbox("Initial Status", ["Available", "In Maintenance", "Deployed"])
+            new_status = st.selectbox("Initial Status", ["Available", "In Maintenance", "Deployed", "Out of Service", "Servicing"])
             
             if st.form_submit_button("Add to Fleet"):
                 if new_rig_name.strip():
