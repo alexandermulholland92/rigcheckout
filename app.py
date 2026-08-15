@@ -3,9 +3,11 @@ import sqlite3
 import pandas as pd
 from datetime import datetime
 
+# --- CONFIGURATION ---
+st.set_page_config(page_title="Rig Checkout System", layout="wide")
 DB_NAME = "inventory.db"
 
-Define the full schema based on the CSV headers
+# Define the full schema based on the CSV headers
 COLUMNS = {
     "rig_name": "Rig Name",
     "status": "Status",
