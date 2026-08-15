@@ -29,14 +29,11 @@ COLUMNS = {
     "home_wifi": "Home WiFi",
     "overnight_charge": "Overnight Charge"
 }
-# config = {}
-# Get all column names starting from index 9 (the 10th column, since index starts at 0)
-# Adjust the `9` if you meant the literal 9th column (which is index 8)
-# cols_to_change = df.columns[9:] 
-
-# for col in cols_to_change:
-    # Skip the damage notes column
+config = {}
+for col in cols_to_change:
+    # 4 spaces before 'if'
     if col.lower() != "damage notes": 
+        # 8 spaces before 'config'
         config[col] = st.column_config.SelectboxColumn(
             options=["Yes", "No"],
             required=True
