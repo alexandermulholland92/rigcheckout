@@ -296,7 +296,7 @@ with tab_dash:
                         
                 st.success("Database updated successfully!")
                 st.rerun()
-             else:
+        else:
             # Standard User View (Read-Only)
             display_df = fleet_data.rename(columns=COLUMNS)
             
