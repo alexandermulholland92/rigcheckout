@@ -332,7 +332,7 @@ with tab_return:
                 st.rerun()
     else:
         st.info("No rigs are currently deployed.")
-```            rig_name TEXT UNIQUE,
+        rig_name TEXT UNIQUE,
             status TEXT DEFAULT 'Available'
         )
     ''')
