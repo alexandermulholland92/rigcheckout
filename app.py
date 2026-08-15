@@ -304,4 +304,37 @@ with tab_dash:
 with tab_return:
     st.subheader("Return Hardware")
     conn = sqlite3.connect(DB_NAME)
-    deployed_rig
+    deployed_rigs = [r[0] for r in conn.execute("SELECT rig_name FROM fleet WHERE status='Deployed'").fetchall()]
+    conn.close()
+    
+    if deployed_rigs:
+        with st.form("return_form"):
+            return_rig = st.selectbox("Select Rig to Return", deployed_rigs)
+            return_notes = st.text_area("Return Notes / Damage Report (Optional)")
+            
+            if st.form_submit_button("Return Rig"):
+                # Clear out the assignee data and set back to Available
+                payload = {
+                    "status": "Available",
+                    "assigned_to": "",
+                    "location": "",
+                    "address": "",
+                    "shift_lead": "",
+                    "lead_number": "",
+                    "damage_notes": return_notes,
+                    "wifi_configured": "",
+                    "clothing_shoes": "",
+                    "batteries_charged": "",
+                    "hotspot_connect": "",
+                    "test_recording": "",
+                    "servsafe_card": "",
+                    "sexual_harassment_training": "",
+                    "workplace_violence_training": "",
+                    "home_wifi": "",
+                    "overnight_charge": ""
+                }
+                update_rig_state(return_rig, payload)
+                st.success(f"{return_rig} has been returned and is now Available.")
+                st.rerun()
+    else:
+        st.info("No rigs are currently deployed.")
