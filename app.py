@@ -7,24 +7,6 @@ from datetime import datetime
 st.set_page_config(page_title="Rig Checkout System", layout="wide")
 DB_NAME = "inventory.db"
 
-# config = {}
-# Get all column names starting from index 9 (the 10th column, since index starts at 0)
-# Adjust the `9` if you meant the literal 9th column (which is index 8)
-# cols_to_change = df.columns[9:] 
-
-for col in cols_to_change:
-    # Skip the damage notes column
-    if col.lower() != "damage notes": 
-        config[col] = st.column_config.SelectboxColumn(
-            options=["Yes", "No"],
-            required=True
-        )
-
-edited_df = st.data_editor(
-    df,
-    column_config=config
-)
-
 # Define the full schema based on the CSV headers
 COLUMNS = {
     "rig_name": "Rig Name",
@@ -47,7 +29,23 @@ COLUMNS = {
     "home_wifi": "Home WiFi",
     "overnight_charge": "Overnight Charge"
 }
+# config = {}
+# Get all column names starting from index 9 (the 10th column, since index starts at 0)
+# Adjust the `9` if you meant the literal 9th column (which is index 8)
+# cols_to_change = df.columns[9:] 
 
+for col in cols_to_change:
+    # Skip the damage notes column
+    if col.lower() != "damage notes": 
+        config[col] = st.column_config.SelectboxColumn(
+            options=["Yes", "No"],
+            required=True
+        )
+
+edited_df = st.data_editor(
+    df,
+    column_config=config
+)
 def init_db():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
