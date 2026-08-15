@@ -1,3 +1,7 @@
+Here is the updated, complete script. I have added the location column to the database, updated the dashboard to display it to the right of the "Assigned To" column, and added a "Location" input field in the Check Out tab.
+
+You can copy and paste this entire block to replace your current script:
+
 import streamlit as st
 import sqlite3
 import pandas as pd
@@ -22,6 +26,8 @@ def init_db():
     
     if "assigned_to" not in existing_columns:
         cursor.execute("ALTER TABLE fleet ADD COLUMN assigned_to TEXT DEFAULT ''")
+    if "location" not in existing_columns:
+        cursor.execute("ALTER TABLE fleet ADD COLUMN location TEXT DEFAULT ''")
     if "last_updated" not in existing_columns:
         cursor.execute("ALTER TABLE fleet ADD COLUMN last_updated TEXT DEFAULT ''")
         
@@ -30,7 +36,8 @@ def init_db():
 
 def fetch_fleet():
     conn = sqlite3.connect(DB_NAME)
-    df = pd.read_sql_query("SELECT rig_name, status, assigned_to, last_updated FROM fleet", conn)
+Added location to the right of assigned_to
+    df = pd.read_sql_query("SELECT rig_name, status, assigned_to, location, last_updated FROM fleet", conn)
     conn.close()
     return df
 
@@ -42,15 +49,15 @@ def get_rigs_by_status(status):
     conn.close()
     return rigs
 
-def update_rig_state(rig_name, status, assignee):
+def update_rig_state(rig_name, status, assignee, location):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     cursor.execute('''
         UPDATE fleet 
-        SET status=?, assigned_to=?, last_updated=? 
+        SET status=?, assigned_to=?, location=?, last_updated=? 
         WHERE rig_name=?
-    ''', (status, assignee, timestamp, rig_name))
+    ''', (status, assignee, location, timestamp, rig_name))
     conn.commit()
     conn.close()
 
@@ -74,7 +81,6 @@ with tab_dash:
     if fleet_data.empty:
         st.info("Fleet uninitialized. Provision hardware via the Admin portal.")
     else:
-        # Use st.data_editor instead of st.dataframe for interactive cells
         edited_df = st.data_editor(
             fleet_data,
             use_container_width=True,
@@ -88,20 +94,24 @@ with tab_dash:
                     required=True,
                 ),
                 "assigned_to": st.column_config.TextColumn("Assigned To", disabled=True),
+                "location": st.column_config.TextColumn("Location", disabled=True),
                 "last_updated": st.column_config.TextColumn("Last Updated", disabled=True),
             }
         )
         
-        # Detect if the status was changed in the UI and update the database
+Detect if the status was changed in the UI and update the database
         if not fleet_data.equals(edited_df):
             changed_rows = edited_df[edited_df['status'] != fleet_data['status']]
             for _, row in changed_rows.iterrows():
-                # If changing to a non-deployed state, we can optionally clear the assignee
                 assignee = row['assigned_to']
+                location = row['location']
+                
+Clear assignee and location if changing to a non-deployed state
                 if row['status'] in ["Available", "In Maintenance", "Out of Service", "Servicing"]:
                     assignee = "" 
+                    location = ""
                     
-                update_rig_state(row['rig_name'], row['status'], assignee)
+                update_rig_state(row['rig_name'], row['status'], assignee, location)
             
             st.success("Database updated successfully!")
             st.rerun()
@@ -114,14 +124,15 @@ with tab_checkout:
         with st.form("checkout_form"):
             selected_rig = st.selectbox("Select Rig", available_rigs)
             assignee = st.text_input("Assignee Name (e.g., Roshaun, Daniel)")
+            location = st.text_input("Location (e.g., Hotel, Farm, Menlo Park)")
             
             if st.form_submit_button("Check Out"):
-                if assignee.strip():
-                    update_rig_state(selected_rig, "Deployed", assignee.strip())
-                    st.success(f"Rig '{selected_rig}' deployed to {assignee}.")
+                if assignee.strip() and location.strip():
+                    update_rig_state(selected_rig, "Deployed", assignee.strip(), location.strip())
+                    st.success(f"Rig '{selected_rig}' deployed to {assignee} at {location}.")
                     st.rerun()
                 else:
-                    st.warning("Assignee name is required.")
+                    st.warning("Both Assignee name and Location are required.")
     else:
         st.info("No hardware currently available for deployment.")
 
@@ -135,7 +146,8 @@ with tab_return:
             new_condition = st.selectbox("Return Condition", ["Available", "In Maintenance", "Out of Service", "Servicing"])
             
             if st.form_submit_button("Process Return"):
-                update_rig_state(return_rig, new_condition, "")
+Clear assignee and location upon return
+                update_rig_state(return_rig, new_condition, "", "")
                 st.success(f"Rig '{return_rig}' returned. Status updated to {new_condition}.")
                 st.rerun()
     else:
@@ -161,8 +173,8 @@ if admin_password == "Hellfire":
                         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                         
                         cursor.execute(
-                            "INSERT INTO fleet (rig_name, status, assigned_to, last_updated) VALUES (?, ?, ?, ?)", 
-                            (new_rig_name.strip(), new_status, "", timestamp)
+                            "INSERT INTO fleet (rig_name, status, assigned_to, location, last_updated) VALUES (?, ?, ?, ?, ?)", 
+                            (new_rig_name.strip(), new_status, "", "", timestamp)
                         )
                         conn.commit()
                         st.success(f"Rig '{new_rig_name}' provisioned.")
@@ -175,7 +187,7 @@ if admin_password == "Hellfire":
                     st.warning("Rig ID is required.")
 
     with st.sidebar.expander("Bulk Import (CSV)"):
-        st.caption("Requires a 'rig_name' column. Optional 'status' column.")
+        st.caption("Requires a 'rig_name' column. Optional 'status' and 'location' columns.")
         uploaded_file = st.file_uploader("Upload CSV", type=["csv"])
         
         if uploaded_file is not None:
@@ -199,10 +211,14 @@ if admin_password == "Hellfire":
                             if 'status' in df_import.columns and pd.notna(row['status']):
                                 r_status = str(row['status']).strip()
                                 
+                            r_location = ""
+                            if 'location' in df_import.columns and pd.notna(row['location']):
+                                r_location = str(row['location']).strip()
+                                
                             try:
                                 cursor.execute(
-                                    "INSERT INTO fleet (rig_name, status, assigned_to, last_updated) VALUES (?, ?, ?, ?)", 
-                                    (r_name, r_status, "", timestamp)
+                                    "INSERT INTO fleet (rig_name, status, assigned_to, location, last_updated) VALUES (?, ?, ?, ?, ?)", 
+                                    (r_name, r_status, "", r_location, timestamp)
                                 )
                                 added_count += 1
                             except sqlite3.IntegrityError:
