@@ -3,7 +3,7 @@ import sqlite3
 import pandas as pd
 from datetime import datetime
 
---- CONFIGURATION ---
+# --- CONFIGURATION ---
 st.set_page_config(page_title="Rig Checkout System", layout="wide")
 DB_NAME = "inventory.db"
 
@@ -75,7 +75,7 @@ init_db()
 
 st.title("Rig Checkout List")
 
---- ADMIN AUTHENTICATION ---
+# --- ADMIN AUTHENTICATION ---
 st.sidebar.header("System Access")
 admin_key = st.sidebar.text_input("Admin Key", type="password")
 is_admin = (admin_key == "Hellfire")
@@ -84,7 +84,7 @@ if is_admin:
     st.sidebar.divider()
     st.sidebar.subheader("Admin Controls")
     
-1. Add Single Rig
+# 1. Add Single Rig
     with st.sidebar.expander("Add Single Rig"):
         new_rig = st.text_input("New Rig Name")
         if st.button("Add Rig"):
@@ -101,7 +101,7 @@ if is_admin:
             else:
                 st.sidebar.warning("Please enter a rig name.")
 
-2. Delete Rig
+# 2. Delete Rig
     with st.sidebar.expander("Delete Rig"):
         conn = sqlite3.connect(DB_NAME)
         all_rigs = [r[0] for r in conn.execute("SELECT rig_name FROM fleet ORDER BY rig_name").fetchall()]
@@ -119,7 +119,7 @@ if is_admin:
         else:
             st.sidebar.info("No rigs in database.")
     
-3. Bulk Import CSV
+# 3. Bulk Import CSV
     with st.sidebar.expander("Bulk Import CSV"):
         up = st.file_uploader("Upload CSV Sheet", type=["csv"])
         if up and st.button("Process Import"):
@@ -177,7 +177,7 @@ if is_admin:
             st.sidebar.success(f"Successfully imported/updated {added_count} rigs.")
             st.rerun()
 
---- MAIN TABS ---
+# --- MAIN TABS ---
 tab_checkout, tab_dash, tab_return = st.tabs(["Check Out", "Dashboard", "Return"])
 
 with tab_checkout:
@@ -297,7 +297,7 @@ with tab_dash:
                 st.success("Database updated successfully!")
                 st.rerun()
         else:
-Standard User View (Read-Only)
+# Standard User View (Read-Only)
             display_df = fleet_data.rename(columns=COLUMNS)
             st.dataframe(display_df, use_container_width=True, hide_index=True)
 
