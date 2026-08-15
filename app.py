@@ -154,13 +154,12 @@ with tab_checkout:
             
             col1, col2 = st.columns(2)
             with col1:
-                assignee = st.text_input("Assignee Name (Column 1)")
+                assignee = st.text_input("Assignee Name")
                 loc = st.text_input("Off-Site Location Name")
                 addr = st.text_input("Off-Site Location Address")
+            with col2:
                 lead = st.text_input("Shift Lead's Name")
                 lead_num = st.text_input("Shift Lead's Number")
-            with col2:
-                damage = st.selectbox("Is there any damage to the rig?", ["No", "Yes"])
                 
             st.write("---")
             st.caption("Safety & Technical Checklist")
@@ -179,6 +178,7 @@ with tab_checkout:
             home_wifi = c3.selectbox("Reliable WiFi/Ethernet at home?", ["Yes", "No"])
             
             overnight = c1.selectbox("Can charge/upload overnight?", ["Yes", "No"])
+            damage = c2.selectbox("Is there any damage to the rig?", ["No", "Yes"])
             
             if st.form_submit_button("Check Out"):
                 payload = {
@@ -246,48 +246,45 @@ with tab_dash:
             # Standard User View
             core_cols = ["rig_name", "status", "assigned_to"]
             
-            edited_df = st.data_editor(
-                fleet_data[core_cols],
+            st.dataframe(
+                fleet_data[core_cols].rename(columns={"rig_name": "Rig Name", "status": "Status", "assigned_to": "Assigned To"}),
                 use_container_width=True,
-                hide_index=True,
-                column_config={
-                    "rig_name": st.column_config.TextColumn("Rig Name", disabled=True),
-                    "status": st.column_config.SelectboxColumn("Status", options=["Available", "Deployed", "In Maintenance", "Out of Service", "Servicing"], required=True),
-                    "assigned_to": st.column_config.TextColumn("Assigned To", disabled=True),
-                }
+                hide_index=True
             )
-            
-            if not fleet_data[core_cols].equals(edited_df):
-                changed_rows = edited_df[edited_df['status'] != fleet_data['status']]
-                for _, row in changed_rows.iterrows():
-                    update_payload = {"status": row['status']}
-                    if row['status'] in ["Available", "In Maintenance", "Out of Service", "Servicing"]:
-                        update_payload["assigned_to"] = ""
-                    update_rig_state(row['rig_name'], update_payload)
-                st.success("Status updated!")
-                st.rerun()
-            
-            with st.expander("Expand Technical & Safety Details"):
-                extra_cols = [c for c in fleet_data.columns if c not in core_cols]
-                display_df = fleet_data[["rig_name"] + extra_cols].rename(columns=COLUMNS)
-                st.dataframe(display_df, hide_index=True, use_container_width=True)
 
 with tab_return:
     st.subheader("Return Hardware")
     conn = sqlite3.connect(DB_NAME)
-    deployed = [r[0] for r in conn.execute("SELECT rig_name FROM fleet WHERE status='Deployed'").fetchall()]
+    deployed_rigs = [r[0] for r in conn.execute("SELECT rig_name FROM fleet WHERE status='Deployed'").fetchall()]
     conn.close()
     
-    if deployed:
+    if deployed_rigs:
         with st.form("return_form"):
-            r_rig = st.selectbox("Select Rig", deployed)
-            r_status = st.selectbox("Return Condition", ["Available", "In Maintenance", "Out of Service", "Servicing"])
+            return_rig = st.selectbox("Select Rig to Return", deployed_rigs)
+            return_notes = st.text_area("Return Notes / Damage Report (Optional)")
+            
             if st.form_submit_button("Process Return"):
-                # Clear out all the checkout data when returning
-                reset_data = {k: "" for k in COLUMNS.keys() if k not in ["rig_name", "status", "last_updated"]}
-                reset_data["status"] = r_status
-                update_rig_state(r_rig, reset_data)
-                st.success(f"{r_rig} returned. Status updated to {r_status}.")
+                payload = {
+                    "status": "Available",
+                    "assigned_to": "",
+                    "location": "",
+                    "address": "",
+                    "shift_lead": "",
+                    "lead_number": "",
+                    "damage_notes": return_notes,
+                    "wifi_configured": "",
+                    "clothing_shoes": "",
+                    "batteries_charged": "",
+                    "hotspot_connect": "",
+                    "test_recording": "",
+                    "servsafe_card": "",
+                    "sexual_harassment_training": "",
+                    "workplace_violence_training": "",
+                    "home_wifi": "",
+                    "overnight_charge": ""
+                }
+                update_rig_state(return_rig, payload)
+                st.success(f"{return_rig} has been returned and is now Available.")
                 st.rerun()
     else:
-        st.info("No hardware currently deployed.")
+        st.info("No rigs are currently deployed.")
