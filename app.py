@@ -332,7 +332,7 @@ with tab_return:
                 st.rerun()
     else:
         st.info("No rigs are currently deployed.")
-```e(row['rig_name'], update_payload)
+                e(row['rig_name'], update_payload)
                         
                 st.success("Database updated successfully!")
                 st.rerun()
