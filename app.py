@@ -12,8 +12,8 @@ COLUMNS = {
     "rig_name": "Rig Name",
     "status": "Status",
     "assigned_to": "Assigned To",
-    "location": "Location",
     "last_updated": "Last Updated",
+    "location": "Location"
     "address": "Location Address",
     "shift_lead": "Shift Lead",
     "lead_number": "Lead Number",
@@ -296,11 +296,24 @@ with tab_dash:
                         
                 st.success("Database updated successfully!")
                 st.rerun()
-        else:
-# Standard User View (Read-Only)
+             else:
+            # Standard User View (Read-Only)
             display_df = fleet_data.rename(columns=COLUMNS)
+            
+            # Define the exact columns and order for non-admins
+            # This makes Location first and drops Location Address and everything after Last Updated
+            visible_columns = [
+                "Location", 
+                "Rig Name", 
+                "Status", 
+                "Assigned To", 
+                "Last Updated"
+            ]
+            
+            # Filter the dataframe to only show the specified columns in that order
+            display_df = display_df[visible_columns]
+            
             st.dataframe(display_df, use_container_width=True, hide_index=True)
-
 with tab_return:
     st.subheader("Return Hardware")
     conn = sqlite3.connect(DB_NAME)
