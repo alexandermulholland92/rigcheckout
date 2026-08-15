@@ -34,7 +34,7 @@ COLUMNS = {
 # Adjust the `9` if you meant the literal 9th column (which is index 8)
 # cols_to_change = df.columns[9:] 
 
-for col in cols_to_change:
+# for col in cols_to_change:
     # Skip the damage notes column
     if col.lower() != "damage notes": 
         config[col] = st.column_config.SelectboxColumn(
