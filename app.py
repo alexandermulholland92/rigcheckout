@@ -13,7 +13,7 @@ COLUMNS = {
     "status": "Status",
     "assigned_to": "Assigned To",
     "last_updated": "Last Updated",
-    "location": "Location"
+    "location": "Location",
     "address": "Location Address",
     "shift_lead": "Shift Lead",
     "lead_number": "Lead Number",
