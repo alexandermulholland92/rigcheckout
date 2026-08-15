@@ -1,7 +1,3 @@
-Here is the updated, complete script. I have added the location column to the database, updated the dashboard to display it to the right of the "Assigned To" column, and added a "Location" input field in the Check Out tab.
-
-You can copy and paste this entire block to replace your current script:
-
 import streamlit as st
 import sqlite3
 import pandas as pd
