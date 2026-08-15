@@ -5,7 +5,7 @@ from datetime import datetime
 
 DB_NAME = "inventory.db"
 
-# Define the full schema based on the CSV headers
+Define the full schema based on the CSV headers
 COLUMNS = {
     "rig_name": "Rig Name",
     "status": "Status",
@@ -73,7 +73,7 @@ init_db()
 
 st.title("Rig Checkout List")
 
-# --- ADMIN AUTHENTICATION ---
+--- ADMIN AUTHENTICATION ---
 st.sidebar.header("System Access")
 admin_key = st.sidebar.text_input("Admin Key", type="password")
 is_admin = (admin_key == "Hellfire")
@@ -82,6 +82,42 @@ if is_admin:
     st.sidebar.divider()
     st.sidebar.subheader("Admin Controls")
     
+1. Add Single Rig
+    with st.sidebar.expander("Add Single Rig"):
+        new_rig = st.text_input("New Rig Name")
+        if st.button("Add Rig"):
+            if new_rig.strip():
+                try:
+                    conn = sqlite3.connect(DB_NAME)
+                    conn.execute("INSERT INTO fleet (rig_name) VALUES (?)", (new_rig.strip(),))
+                    conn.commit()
+                    conn.close()
+                    st.sidebar.success(f"Added {new_rig.strip()}")
+                    st.rerun()
+                except sqlite3.IntegrityError:
+                    st.sidebar.error("Rig already exists.")
+            else:
+                st.sidebar.warning("Please enter a rig name.")
+
+2. Delete Rig
+    with st.sidebar.expander("Delete Rig"):
+        conn = sqlite3.connect(DB_NAME)
+        all_rigs = [r[0] for r in conn.execute("SELECT rig_name FROM fleet ORDER BY rig_name").fetchall()]
+        conn.close()
+        
+        if all_rigs:
+            del_rig = st.selectbox("Select Rig to Delete", all_rigs)
+            if st.button("Delete Rig"):
+                conn = sqlite3.connect(DB_NAME)
+                conn.execute("DELETE FROM fleet WHERE rig_name=?", (del_rig,))
+                conn.commit()
+                conn.close()
+                st.sidebar.success(f"Deleted {del_rig}")
+                st.rerun()
+        else:
+            st.sidebar.info("No rigs in database.")
+    
+3. Bulk Import CSV
     with st.sidebar.expander("Bulk Import CSV"):
         up = st.file_uploader("Upload CSV Sheet", type=["csv"])
         if up and st.button("Process Import"):
@@ -139,7 +175,7 @@ if is_admin:
             st.sidebar.success(f"Successfully imported/updated {added_count} rigs.")
             st.rerun()
 
-# --- MAIN TABS ---
+--- MAIN TABS ---
 tab_checkout, tab_dash, tab_return = st.tabs(["Check Out", "Dashboard", "Return"])
 
 with tab_checkout:
@@ -215,27 +251,35 @@ with tab_dash:
     else:
         if is_admin:
             st.info("Admin Mode Active: All fields are editable.")
-            # Rename columns to human-readable format for the editor
+Rename columns to human-readable format for the editor
             display_df = fleet_data.rename(columns=COLUMNS)
             
-            # Show full dataframe editor
+Show full dataframe editor with dropdown for Status
             edited_df = st.data_editor(
                 display_df,
                 use_container_width=True,
                 hide_index=True,
-                disabled=["Rig Name", "Last Updated"] # Prevent changing primary key and auto-timestamp
+                disabled=["Rig Name", "Last Updated"], # Prevent changing primary key and auto-timestamp
+                column_config={
+                    "Status": st.column_config.SelectboxColumn(
+                        "Status",
+                        help="Select rig status",
+                        options=["Available", "Deployed", "Needs Servicing"],
+                        required=True
+                    )
+                }
             )
             
-            # Check if admin made changes
+Check if admin made changes
             if not display_df.equals(edited_df):
-                # Map column names back to database schema
+Map column names back to database schema
                 rev_columns = {v: k for k, v in COLUMNS.items()}
                 edited_db_df = edited_df.rename(columns=rev_columns)
                 
                 for i, row in edited_db_df.iterrows():
                     orig_row = fleet_data.iloc[i]
                     if not row.equals(orig_row):
-                        # Extract only the changed data for the payload
+Extract only the changed data for the payload
                         update_payload = row.drop(["rig_name", "last_updated"]).to_dict()
                         update_rig_state(row['rig_name'], update_payload)
                         
@@ -243,7 +287,7 @@ with tab_dash:
                 st.rerun()
                 
         else:
-            # Standard User View
+Standard User View
             core_cols = ["rig_name", "status", "assigned_to"]
             
             st.dataframe(
