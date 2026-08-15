@@ -32,7 +32,6 @@ def init_db():
 
 def fetch_fleet():
     conn = sqlite3.connect(DB_NAME)
-Added location to the right of assigned_to
     df = pd.read_sql_query("SELECT rig_name, status, assigned_to, location, last_updated FROM fleet", conn)
     conn.close()
     return df
@@ -95,14 +94,12 @@ with tab_dash:
             }
         )
         
-Detect if the status was changed in the UI and update the database
         if not fleet_data.equals(edited_df):
             changed_rows = edited_df[edited_df['status'] != fleet_data['status']]
             for _, row in changed_rows.iterrows():
                 assignee = row['assigned_to']
                 location = row['location']
                 
-Clear assignee and location if changing to a non-deployed state
                 if row['status'] in ["Available", "In Maintenance", "Out of Service", "Servicing"]:
                     assignee = "" 
                     location = ""
@@ -142,7 +139,6 @@ with tab_return:
             new_condition = st.selectbox("Return Condition", ["Available", "In Maintenance", "Out of Service", "Servicing"])
             
             if st.form_submit_button("Process Return"):
-Clear assignee and location upon return
                 update_rig_state(return_rig, new_condition, "", "")
                 st.success(f"Rig '{return_rig}' returned. Status updated to {new_condition}.")
                 st.rerun()
@@ -218,7 +214,7 @@ if admin_password == "Hellfire":
                                 )
                                 added_count += 1
                             except sqlite3.IntegrityError:
-                                pass # Skip existing
+                                pass 
                         
                         conn.commit()
                         conn.close()
