@@ -296,7 +296,7 @@ with tab_return:
                 st.success(f"{return_rig} has been returned and is now Available.")
                 st.rerun()
     else:
-        st.info("No rigs are currently deployed.")            rig_name TEXT UNIQUE,
+                st.info("No rigs are currently deployed.")            rig_name TEXT UNIQUE,
             status TEXT DEFAULT 'Available'
         
     ''')
