@@ -3,14 +3,10 @@ import sqlite3
 import pandas as pd
 from datetime import datetime
 
-# --- CONFIGURATION ---
+--- CONFIGURATION ---
 st.set_page_config(page_title="Rig Checkout System", layout="wide")
 DB_NAME = "inventory.db"
- 
-# Sort A-Z by Rig Name
-display_df = display_df.sort_values(by="Rig Name")
 
-# Define the full schema based on the CSV headers
 COLUMNS = {
     "rig_name": "Rig Name",
     "status": "Status",
@@ -78,7 +74,7 @@ init_db()
 
 st.title("Rig Checkout List")
 
-# --- ADMIN AUTHENTICATION ---
+--- ADMIN AUTHENTICATION ---
 st.sidebar.header("System Access")
 admin_key = st.sidebar.text_input("Admin Key", type="password")
 is_admin = (admin_key == "Hellfire")
@@ -87,11 +83,7 @@ if is_admin:
     st.sidebar.divider()
     st.sidebar.subheader("Admin Controls")
 
-# Sort A-Z by Rig Name
-display_df = display_df.sort_values(by="Rig Name")
-
-# 1. Add Single Rig
-with st.sidebar.expander("Add Single Rig"):
+    with st.sidebar.expander("Add Single Rig"):
         new_rig = st.text_input("New Rig Name")
         if st.button("Add Rig"):
             if new_rig.strip():
@@ -107,8 +99,7 @@ with st.sidebar.expander("Add Single Rig"):
             else:
                 st.sidebar.warning("Please enter a rig name.")
 
-# 2. Delete Rig
- with st.sidebar.expander("Delete Rig"):
+    with st.sidebar.expander("Delete Rig"):
         conn = sqlite3.connect(DB_NAME)
         all_rigs = [r[0] for r in conn.execute("SELECT rig_name FROM fleet ORDER BY rig_name").fetchall()]
         conn.close()
@@ -125,8 +116,7 @@ with st.sidebar.expander("Add Single Rig"):
         else:
             st.sidebar.info("No rigs in database.")
     
-# 3. Bulk Import CSV
-  with st.sidebar.expander("Bulk Import CSV"):
+    with st.sidebar.expander("Bulk Import CSV"):
         up = st.file_uploader("Upload CSV Sheet", type=["csv"])
         if up and st.button("Process Import"):
             df_in = pd.read_csv(up)
@@ -183,7 +173,7 @@ with st.sidebar.expander("Add Single Rig"):
             st.sidebar.success(f"Successfully imported/updated {added_count} rigs.")
             st.rerun()
 
-# --- MAIN TABS ---
+--- MAIN TABS ---
 tab_checkout, tab_dash, tab_return = st.tabs(["Check Out", "Dashboard", "Return"])
 
 with tab_checkout:
@@ -257,11 +247,11 @@ with tab_dash:
     if fleet_data.empty:
         st.info("Fleet uninitialized. Provision hardware via the Admin portal.")
     else:
+        display_df = fleet_data.rename(columns=COLUMNS)
+        display_df = display_df.sort_values(by="Rig Name")
+        
         if is_admin:
             st.info("Admin Mode Active: All fields are editable.")
-            display_df = fleet_data.rename(columns=COLUMNS)
-         # Sort A-Z by Rig Name
-         display_df = display_df.sort_values(by="Rig Name")            
             
             editor_config = {
                 "Status": st.column_config.SelectboxColumn(
@@ -303,38 +293,21 @@ with tab_dash:
                         update_rig_state(row['rig_name'], update_payload)
                         
                 st.success("Database updated successfully!")
-                st.rerun()
         else:
-            # Standard User View (Read-Only)
-            display_df = fleet_data.rename(columns=COLUMNS)
-            # Sort A-Z by Rig Name
-            display_df = display_df.sort_values(by="Rig Name")
-            # Define the exact columns and order for non-admins
-            # This makes Location first and drops Location Address and everything after Last Updated
-            visible_columns = [
-                "Rig Name", 
-                "Status", 
-                "Assigned To", 
-                "Last Updated"
-            ]
-            
-            # Filter the dataframe to only show the specified columns in that order
-            display_df = display_df[visible_columns]
-            
             st.dataframe(display_df, use_container_width=True, hide_index=True)
+
 with tab_return:
     st.subheader("Return Hardware")
     conn = sqlite3.connect(DB_NAME)
-    deployed_rigs = [r[0] for r in conn.execute("SELECT rig_name FROM fleet WHERE status='Deployed'").fetchall()]
+    deployed_rigs = [r[0] for r in conn.execute("SELECT rig_name FROM fleet WHERE status != 'Available'").fetchall()]
     conn.close()
     
     if deployed_rigs:
         with st.form("return_form"):
             return_rig = st.selectbox("Select Rig to Return", deployed_rigs)
-            return_notes = st.text_area("Return Notes / Damage Report (Optional)")
+            notes = st.text_area("Return Notes / Damage Report")
             
-            if st.form_submit_button("Return Rig"):
-                # Clear out the assignee data and set back to Available
+            if st.form_submit_button("Process Return"):
                 payload = {
                     "status": "Available",
                     "assigned_to": "",
@@ -342,7 +315,7 @@ with tab_return:
                     "address": "",
                     "shift_lead": "",
                     "lead_number": "",
-                    "damage_notes": return_notes,
+                    "damage_notes": notes,
                     "wifi_configured": "",
                     "clothing_shoes": "",
                     "batteries_charged": "",
@@ -355,7 +328,7 @@ with tab_return:
                     "overnight_charge": ""
                 }
                 update_rig_state(return_rig, payload)
-                st.success(f"{return_rig} has been returned and is now Available.")
+                st.success(f"{return_rig} returned successfully.")
                 st.rerun()
     else:
-        st.info("No rigs are currently deployed.")
+        st.info("No rigs currently deployed.")
