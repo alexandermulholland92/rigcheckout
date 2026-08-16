@@ -29,6 +29,12 @@ COLUMNS = {
     "overnight_charge": "Overnight Charge"
 }
 
+# Columns to show by default in the dashboard to prevent clutter
+CORE_VIEW_COLS = [
+    "Rig Name", "Status", "Assigned To", "Location", 
+    "Last Updated", "Shift Lead", "Damage Notes"
+]
+
 def init_db():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
