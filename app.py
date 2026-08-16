@@ -29,10 +29,10 @@ COLUMNS = {
     "overnight_charge": "Overnight Charge"
 }
 
-Columns to show by default in the dashboard
+#Columns to show by default in the dashboard
 CORE_VIEW_COLS = [
     "Rig Name", "Status", "Assigned To", "Location", 
-    "Last Updated", "Shift Lead", "Damage Notes"
+    "Last Updated"
 ]
 
 def init_db():
