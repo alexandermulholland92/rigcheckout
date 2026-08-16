@@ -2,6 +2,7 @@ import streamlit as st
 import sqlite3
 import pandas as pd
 from datetime import datetime
+import io
 
 # --- CONFIGURATION ---
 st.set_page_config(page_title="Rig Checkout System", layout="wide")
@@ -12,8 +13,8 @@ COLUMNS = {
     "rig_name": "Rig Name",
     "status": "Status",
     "assigned_to": "Assigned To",
-    "last_updated": "Last Updated",
     "location": "Location",
+    "last_updated": "Last Updated",
     "address": "Location Address",
     "shift_lead": "Shift Lead",
     "lead_number": "Lead Number",
@@ -178,8 +179,21 @@ if is_admin:
             st.sidebar.success(f"Successfully imported/updated {added_count} rigs.")
             st.rerun()
 
+# 4. Export CSV
+    with st.sidebar.expander("Export CSV"):
+        fleet_df = fetch_fleet()
+        export_df = fleet_df.rename(columns=COLUMNS)
+        csv_buffer = io.StringIO()
+        export_df.to_csv(csv_buffer, index=False)
+        st.download_button(
+            label="Download Full Fleet CSV",
+            data=csv_buffer.getvalue(),
+            file_name="fleet_export.csv",
+            mime="text/csv"
+        )
+
 # --- MAIN TABS ---
-tab_checkout, tab_dash, tab_return = st.tabs(["Check Out", "Dashboard", "Return"])
+tab_checkout, tab_dash, tab_return, tab_service = st.tabs(["Check Out", "Dashboard", "Return", "Needs Servicing"])
 
 with tab_checkout:
     st.subheader("Deploy Hardware")
@@ -254,7 +268,6 @@ with tab_dash:
     else:
         if is_admin:
             st.info("Admin Mode Active: All fields and columns are visible and editable.")
-            # Admin gets the full dataframe with all columns renamed properly
             display_df = fleet_data.rename(columns=COLUMNS)
             
             editor_config = {
@@ -299,15 +312,16 @@ with tab_dash:
                 st.success("Database updated successfully!")
                 st.rerun()
         else:
-            # Standard User View (Read-Only with hidden columns past Location)
+            # Standard User View
             display_df = fleet_data.rename(columns=COLUMNS)
             
+            # Location is now before Last Updated
             visible_columns = [
                 "Rig Name", 
                 "Status", 
                 "Assigned To", 
-                "Last Updated",
-                "Location"
+                "Location",
+                "Last Updated"
             ]
             
             display_df = display_df[visible_columns]
@@ -350,3 +364,29 @@ with tab_return:
                 st.rerun()
     else:
         st.info("No rigs are currently deployed.")
+
+with tab_service:
+    st.subheader("Mark Rig for Servicing")
+    st.write("Use this section to flag an available rig that needs maintenance, or mark a serviced rig as available again.")
+    
+    conn = sqlite3.connect(DB_NAME)
+    serviceable_rigs = [r[0] for r in conn.execute("SELECT rig_name FROM fleet WHERE status IN ('Available', 'Needs Servicing') ORDER BY rig_name").fetchall()]
+    conn.close()
+    
+    if serviceable_rigs:
+        with st.form("service_form"):
+            srv_rig = st.selectbox("Select Rig", serviceable_rigs)
+            new_status = st.selectbox("Update Status", ["Needs Servicing", "Available"])
+            srv_notes = st.text_area("Service / Damage Notes (Optional)")
+            
+            if st.form_submit_button("Update Status"):
+                payload = {"status": new_status}
+                if srv_notes.strip():
+                    payload["damage_notes"] = srv_notes
+                
+                update_rig_state(srv_rig, payload)
+                st.success(f"{srv_rig} status successfully updated to {new_status}.")
+                st.rerun()
+    else:
+        st.info("No available rigs to report. Rigs must be returned before they can be flagged for servicing.")
+        
