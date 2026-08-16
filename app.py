@@ -8,7 +8,7 @@ st.set_page_config(page_title="Rig Checkout System", layout="wide")
 DB_NAME = "inventory.db"
  
 # Sort A-Z by Rig Name
-            display_df = display_df.sort_values(by="Rig Name")
+     display_df = display_df.sort_values(by="Rig Name")
 
 # Define the full schema based on the CSV headers
 COLUMNS = {
