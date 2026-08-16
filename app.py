@@ -1,13 +1,9 @@
-My apologies! To make absolutely sure nothing gets lost in translation or cut off, here is the entire, complete script in one single block. You can copy and paste this directly into your Python file, replacing everything you currently have.
-
-It includes the database setup, the admin sidebar, the checkout tab, the dashboard (with your CORE_VIEW_COLS filter applied!), and the return tab.
-
 import streamlit as st
 import sqlite3
 import pandas as pd
 from datetime import datetime
 
---- CONFIGURATION ---
+#--- CONFIGURATION ---
 st.set_page_config(page_title="Rig Checkout System", layout="wide")
 DB_NAME = "inventory.db"
 
@@ -84,7 +80,7 @@ init_db()
 
 st.title("Rig Checkout List")
 
---- ADMIN AUTHENTICATION ---
+#--- ADMIN AUTHENTICATION ---
 st.sidebar.header("System Access")
 admin_key = st.sidebar.text_input("Admin Key", type="password")
 is_admin = (admin_key == "Hellfire")
@@ -183,7 +179,7 @@ if is_admin:
             st.sidebar.success(f"Successfully imported/updated {added_count} rigs.")
             st.rerun()
 
---- MAIN TABS ---
+#--- MAIN TABS ---
 tab_checkout, tab_dash, tab_return = st.tabs(["Check Out", "Dashboard", "Return"])
 
 with tab_checkout:
