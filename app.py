@@ -91,7 +91,7 @@ if is_admin:
 display_df = display_df.sort_values(by="Rig Name")
 
 # 1. Add Single Rig
-    with st.sidebar.expander("Add Single Rig"):
+with st.sidebar.expander("Add Single Rig"):
         new_rig = st.text_input("New Rig Name")
         if st.button("Add Rig"):
             if new_rig.strip():
