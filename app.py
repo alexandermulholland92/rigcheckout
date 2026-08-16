@@ -3,10 +3,11 @@ import sqlite3
 import pandas as pd
 from datetime import datetime
 
-#--- CONFIGURATION ---
+# --- CONFIGURATION ---
 st.set_page_config(page_title="Rig Checkout System", layout="wide")
 DB_NAME = "inventory.db"
 
+# Define the full schema based on the CSV headers
 COLUMNS = {
     "rig_name": "Rig Name",
     "status": "Status",
@@ -28,12 +29,6 @@ COLUMNS = {
     "home_wifi": "Home WiFi",
     "overnight_charge": "Overnight Charge"
 }
-
-#Columns to show by default in the dashboard
-CORE_VIEW_COLS = [
-    "Rig Name", "Status", "Assigned To", "Location", 
-    "Last Updated"
-]
 
 def init_db():
     conn = sqlite3.connect(DB_NAME)
@@ -58,7 +53,8 @@ def init_db():
 
 def fetch_fleet():
     conn = sqlite3.connect(DB_NAME)
-    query = f"SELECT {', '.join(COLUMNS.keys())} FROM fleet"
+    # Sorted alphabetically by rig name
+    query = f"SELECT {', '.join(COLUMNS.keys())} FROM fleet ORDER BY rig_name"
     df = pd.read_sql_query(query, conn)
     conn.close()
     return df
@@ -80,7 +76,7 @@ init_db()
 
 st.title("Rig Checkout List")
 
-#--- ADMIN AUTHENTICATION ---
+# --- ADMIN AUTHENTICATION ---
 st.sidebar.header("System Access")
 admin_key = st.sidebar.text_input("Admin Key", type="password")
 is_admin = (admin_key == "Hellfire")
@@ -88,7 +84,8 @@ is_admin = (admin_key == "Hellfire")
 if is_admin:
     st.sidebar.divider()
     st.sidebar.subheader("Admin Controls")
-
+    
+# 1. Add Single Rig
     with st.sidebar.expander("Add Single Rig"):
         new_rig = st.text_input("New Rig Name")
         if st.button("Add Rig"):
@@ -105,6 +102,7 @@ if is_admin:
             else:
                 st.sidebar.warning("Please enter a rig name.")
 
+# 2. Delete Rig
     with st.sidebar.expander("Delete Rig"):
         conn = sqlite3.connect(DB_NAME)
         all_rigs = [r[0] for r in conn.execute("SELECT rig_name FROM fleet ORDER BY rig_name").fetchall()]
@@ -122,6 +120,7 @@ if is_admin:
         else:
             st.sidebar.info("No rigs in database.")
     
+# 3. Bulk Import CSV
     with st.sidebar.expander("Bulk Import CSV"):
         up = st.file_uploader("Upload CSV Sheet", type=["csv"])
         if up and st.button("Process Import"):
@@ -179,13 +178,13 @@ if is_admin:
             st.sidebar.success(f"Successfully imported/updated {added_count} rigs.")
             st.rerun()
 
-#--- MAIN TABS ---
+# --- MAIN TABS ---
 tab_checkout, tab_dash, tab_return = st.tabs(["Check Out", "Dashboard", "Return"])
 
 with tab_checkout:
     st.subheader("Deploy Hardware")
     conn = sqlite3.connect(DB_NAME)
-    available_rigs = [r[0] for r in conn.execute("SELECT rig_name FROM fleet WHERE status='Available'").fetchall()]
+    available_rigs = [r[0] for r in conn.execute("SELECT rig_name FROM fleet WHERE status='Available' ORDER BY rig_name").fetchall()]
     conn.close()
     
     if available_rigs:
@@ -241,96 +240,113 @@ with tab_checkout:
                     "overnight_charge": overnight
                 }
                 update_rig_state(selected_rig, payload)
-                st.success(f"Rig {selected_rig} deployed successfully!")
+                st.success(f"{selected_rig} deployed to {assignee}.")
                 st.rerun()
     else:
-        st.info("No rigs are currently available. Please return a rig or add a new one.")
+        st.info("No rigs currently available.")
 
 with tab_dash:
-    st.subheader("Fleet Dashboard")
+    st.subheader("Fleet Status")
+    fleet_data = fetch_fleet()
     
-    df = fetch_fleet()
-    df_display = df.rename(columns=COLUMNS)
-    
-    show_all = st.checkbox("Show full checklist details", value=False)
-    
-Build column config to hide unwanted columns
-    col_config = {"id": None} 
-    
-    if not show_all:
-        for col in df_display.columns:
-            if col not in CORE_VIEW_COLS and col != "id":
-                col_config[col] = None
-
-    if is_admin:
-        st.caption("Admin Mode: You can edit records directly in the table below and save.")
-        edited_df = st.data_editor(
-            df_display,
-            use_container_width=True,
-            hide_index=True,
-            column_config=col_config,
-            key="admin_grid"
-        )
-        
-        if st.button("Save Grid Changes"):
-            rev_cols = {v: k for k, v in COLUMNS.items()}
-            
-            conn = sqlite3.connect(DB_NAME)
-            cursor = conn.cursor()
-            
-            for index, row in edited_df.iterrows():
-                rig_name = row["Rig Name"]
-                update_data = {rev_cols[col]: str(row[col]) for col in edited_df.columns if col in rev_cols and col != "Rig Name"}
-                update_data["last_updated"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                
-                placeholders = ", ".join([f"{k}=?" for k in update_data.keys()])
-                values = list(update_data.values())
-                values.append(rig_name)
-                
-                cursor.execute(f"UPDATE fleet SET {placeholders} WHERE rig_name=?", values)
-                
-            conn.commit()
-            conn.close()
-            st.success("Database updated successfully!")
-            st.rerun()
+    if fleet_data.empty:
+        st.info("Fleet uninitialized. Provision hardware via the Admin portal.")
     else:
-        # Standard view for non-admins
-        st.dataframe(
-            df_display,
-            use_container_width=True,
-            hide_index=True,
-            column_config=col_config
-        )
+        if is_admin:
+            st.info("Admin Mode Active: All fields and columns are visible and editable.")
+            # Admin gets the full dataframe with all columns renamed properly
+            display_df = fleet_data.rename(columns=COLUMNS)
+            
+            editor_config = {
+                "Status": st.column_config.SelectboxColumn(
+                    "Status",
+                    help="Select rig status",
+                    options=["Available", "Deployed", "Needs Servicing"],
+                    required=True
+                )
+            }
+            
+            checklist_cols = [
+                "Wi-Fi Configured", "Appropriate Gear", "Batteries Charged", 
+                "Hotspot Ready", "Test Recording Done", "ServSafe Card", 
+                "Harassment Training", "Violence Training", "Home WiFi", 
+                "Overnight Charge"
+            ]
+            for col in checklist_cols:
+                editor_config[col] = st.column_config.SelectboxColumn(
+                    options=["Yes", "No", ""]
+                )
+
+            edited_df = st.data_editor(
+                display_df,
+                use_container_width=True,
+                hide_index=True,
+                disabled=["Rig Name", "Last Updated"], 
+                column_config=editor_config,
+                key="fleet_data_editor"
+            )
+            
+            if not display_df.equals(edited_df):
+                rev_columns = {v: k for k, v in COLUMNS.items()}
+                edited_db_df = edited_df.rename(columns=rev_columns)
+                
+                for i, row in edited_db_df.iterrows():
+                    orig_row = fleet_data.iloc[i]
+                    if not row.equals(orig_row):
+                        update_payload = row.drop(["rig_name", "last_updated"]).to_dict()
+                        update_rig_state(row['rig_name'], update_payload)
+                        
+                st.success("Database updated successfully!")
+                st.rerun()
+        else:
+            # Standard User View (Read-Only with hidden columns past Location)
+            display_df = fleet_data.rename(columns=COLUMNS)
+            
+            visible_columns = [
+                "Rig Name", 
+                "Status", 
+                "Assigned To", 
+                "Last Updated",
+                "Location"
+            ]
+            
+            display_df = display_df[visible_columns]
+            
+            st.dataframe(display_df, use_container_width=True, hide_index=True)
 
 with tab_return:
     st.subheader("Return Hardware")
     conn = sqlite3.connect(DB_NAME)
-    deployed_rigs = [r[0] for r in conn.execute("SELECT rig_name FROM fleet WHERE status='Deployed'").fetchall()]
+    deployed_rigs = [r[0] for r in conn.execute("SELECT rig_name FROM fleet WHERE status='Deployed' ORDER BY rig_name").fetchall()]
     conn.close()
     
     if deployed_rigs:
         with st.form("return_form"):
             return_rig = st.selectbox("Select Rig to Return", deployed_rigs)
-            new_damage = st.text_area("Log any new damage (Leave blank if none)")
+            return_notes = st.text_area("Return Notes / Damage Report (Optional)")
             
-            if st.form_submit_button("Process Return"):
-                # Fetch existing damage notes so we don't overwrite them if there are new ones
-                conn = sqlite3.connect(DB_NAME)
-                existing_damage = conn.execute("SELECT damage_notes FROM fleet WHERE rig_name=?", (return_rig,)).fetchone()[0]
-                conn.close()
-                
-                combined_damage = existing_damage
-                if new_damage.strip():
-                    date_str = datetime.now().strftime("%Y-%m-%d")
-                    combined_damage = f"{existing_damage} | [{date_str}] {new_damage.strip()}" if existing_damage else f"[{date_str}] {new_damage.strip()}"
-
-                # Clear out all checkout data but keep the rig name, status, and damage notes
-                reset_payload = {k: "" for k in COLUMNS.keys() if k not in ["rig_name", "status", "damage_notes"]}
-                reset_payload["status"] = "Available"
-                reset_payload["damage_notes"] = combined_damage
-                
-                update_rig_state(return_rig, reset_payload)
-                st.success(f"Rig {return_rig} has been returned and is now Available.")
+            if st.form_submit_button("Return Rig"):
+                payload = {
+                    "status": "Available",
+                    "assigned_to": "",
+                    "location": "",
+                    "address": "",
+                    "shift_lead": "",
+                    "lead_number": "",
+                    "damage_notes": return_notes,
+                    "wifi_configured": "",
+                    "clothing_shoes": "",
+                    "batteries_charged": "",
+                    "hotspot_connect": "",
+                    "test_recording": "",
+                    "servsafe_card": "",
+                    "sexual_harassment_training": "",
+                    "workplace_violence_training": "",
+                    "home_wifi": "",
+                    "overnight_charge": ""
+                }
+                update_rig_state(return_rig, payload)
+                st.success(f"{return_rig} has been returned and is now Available.")
                 st.rerun()
     else:
-        st.info("All rigs are currently available. No rigs to return.")
+        st.info("No rigs are currently deployed.")
