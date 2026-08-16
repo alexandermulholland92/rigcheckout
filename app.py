@@ -3,7 +3,7 @@ import sqlite3
 import pandas as pd
 from datetime import datetime
 
---- CONFIGURATION ---
+# --- CONFIGURATION ---
 st.set_page_config(page_title="Rig Checkout System", layout="wide")
 DB_NAME = "inventory.db"
 
@@ -74,7 +74,7 @@ init_db()
 
 st.title("Rig Checkout List")
 
---- ADMIN AUTHENTICATION ---
+# --- ADMIN AUTHENTICATION ---
 st.sidebar.header("System Access")
 admin_key = st.sidebar.text_input("Admin Key", type="password")
 is_admin = (admin_key == "Hellfire")
@@ -173,7 +173,7 @@ if is_admin:
             st.sidebar.success(f"Successfully imported/updated {added_count} rigs.")
             st.rerun()
 
---- MAIN TABS ---
+# --- MAIN TABS ---
 tab_checkout, tab_dash, tab_return = st.tabs(["Check Out", "Dashboard", "Return"])
 
 with tab_checkout:
