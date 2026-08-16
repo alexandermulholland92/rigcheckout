@@ -6,6 +6,9 @@ from datetime import datetime
 # --- CONFIGURATION ---
 st.set_page_config(page_title="Rig Checkout System", layout="wide")
 DB_NAME = "inventory.db"
+ 
+# Sort A-Z by Rig Name
+            display_df = display_df.sort_values(by="Rig Name")
 
 # Define the full schema based on the CSV headers
 COLUMNS = {
@@ -83,7 +86,10 @@ is_admin = (admin_key == "Hellfire")
 if is_admin:
     st.sidebar.divider()
     st.sidebar.subheader("Admin Controls")
-    
+
+# Sort A-Z by Rig Name
+            display_df = display_df.sort_values(by="Rig Name")
+
 # 1. Add Single Rig
     with st.sidebar.expander("Add Single Rig"):
         new_rig = st.text_input("New Rig Name")
@@ -254,6 +260,8 @@ with tab_dash:
         if is_admin:
             st.info("Admin Mode Active: All fields are editable.")
             display_df = fleet_data.rename(columns=COLUMNS)
+ # Sort A-Z by Rig Name
+            display_df = display_df.sort_values(by="Rig Name")            
             
             editor_config = {
                 "Status": st.column_config.SelectboxColumn(
@@ -299,7 +307,8 @@ with tab_dash:
         else:
             # Standard User View (Read-Only)
             display_df = fleet_data.rename(columns=COLUMNS)
-            
+            # Sort A-Z by Rig Name
+            display_df = display_df.sort_values(by="Rig Name")
             # Define the exact columns and order for non-admins
             # This makes Location first and drops Location Address and everything after Last Updated
             visible_columns = [
