@@ -108,7 +108,7 @@ with st.sidebar.expander("Add Single Rig"):
                 st.sidebar.warning("Please enter a rig name.")
 
 # 2. Delete Rig
-    with st.sidebar.expander("Delete Rig"):
+ with st.sidebar.expander("Delete Rig"):
         conn = sqlite3.connect(DB_NAME)
         all_rigs = [r[0] for r in conn.execute("SELECT rig_name FROM fleet ORDER BY rig_name").fetchall()]
         conn.close()
@@ -126,7 +126,7 @@ with st.sidebar.expander("Add Single Rig"):
             st.sidebar.info("No rigs in database.")
     
 # 3. Bulk Import CSV
-    with st.sidebar.expander("Bulk Import CSV"):
+  with st.sidebar.expander("Bulk Import CSV"):
         up = st.file_uploader("Upload CSV Sheet", type=["csv"])
         if up and st.button("Process Import"):
             df_in = pd.read_csv(up)
