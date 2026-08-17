@@ -5,8 +5,16 @@ from datetime import datetime
 import io
 import traceback
 
+# --- SESSION STATE ---
+if "sidebar_state" not in st.session_state:
+    st.session_state.sidebar_state = "collapsed"
+
 # --- CONFIGURATION ---
-st.set_page_config(page_title="Rig Checkout System", layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(
+    page_title="Rig Checkout System", 
+    layout="wide", 
+    initial_sidebar_state=st.session_state.sidebar_state
+)
 DB_NAME = "inventory.db"
 
 def safe_rerun():
@@ -128,6 +136,12 @@ try:
     st.sidebar.header("System Access")
     admin_key = st.sidebar.text_input("Admin Key", type="password")
     is_admin = (admin_key == "Hellfire")
+
+    # Update state based on login so page refreshes maintain the correct sidebar state
+    if is_admin:
+        st.session_state.sidebar_state = "expanded"
+    else:
+        st.session_state.sidebar_state = "collapsed"
 
     if is_admin:
         st.sidebar.divider()
