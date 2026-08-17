@@ -6,7 +6,7 @@ import io
 import traceback
 
 # --- CONFIGURATION ---
-st.set_page_config(page_title="Rig Checkout System", layout="wide")
+st.set_page_config(page_title="Rig Checkout System", layout="wide", initial_sidebar_state="collapsed")
 DB_NAME = "inventory.db"
 
 def safe_rerun():
