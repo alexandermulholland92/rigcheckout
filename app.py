@@ -32,7 +32,6 @@ COLUMNS = {
 }
 
 def get_connection():
-    # Adding a 20-second timeout prevents the "database is locked" crashes
     return sqlite3.connect(DB_NAME, timeout=20)
 
 def init_db():
@@ -55,9 +54,9 @@ def init_db():
     for col_id in COLUMNS.keys():
         if col_id not in existing and col_id != "id":
             try:
-                cursor.execute(f"ALTER TABLE fleet ADD COLUMN {col_id} TEXT DEFAULT ''")
+                cursor.execute(f'ALTER TABLE fleet ADD COLUMN "{col_id}" TEXT DEFAULT ""')
             except sqlite3.OperationalError:
-                pass # Skip safely if column already exists
+                pass 
             
     # Create History / Audit Log table
     cursor.execute('''
@@ -70,14 +69,19 @@ def init_db():
             notes TEXT
         )
     ''')
+    
+    # Automatically populate sample rigs if the database is empty so it's never blank
+    cursor.execute("SELECT COUNT(*) FROM fleet")
+    if cursor.fetchone()[0] == 0:
+        sample_rigs = ["Rig 1", "Rig 2", "Rig 3", "Rig 4", "Rig 5"]
+        for r in sample_rigs:
+            cursor.execute("INSERT OR IGNORE INTO fleet (rig_name, status) VALUES (?, 'Available')", (r,))
             
     conn.commit()
     conn.close()
 
-# Only run database initialization ONCE per user session to prevent overload
-if "db_initialized" not in st.session_state:
-    init_db()
-    st.session_state.db_initialized = True
+# Initialize database on load
+init_db()
 
 def log_action(rig_name, action, assigned_to="", notes=""):
     try:
@@ -108,7 +112,7 @@ def update_rig_state(rig_name, data_dict):
     cursor = conn.cursor()
     data_dict["last_updated"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
-    placeholders = ", ".join([f"{k}=?" for k in data_dict.keys()])
+    placeholders = ", ".join([f'"{k}"=?' for k in data_dict.keys()])
     values = list(data_dict.values())
     values.append(rig_name)
     
@@ -134,7 +138,7 @@ if is_admin:
             if new_rig.strip():
                 try:
                     conn = get_connection()
-                    conn.execute("INSERT INTO fleet (rig_name) VALUES (?)", (new_rig.strip(),))
+                    conn.execute("INSERT INTO fleet (rig_name, status) VALUES (?, 'Available')", (new_rig.strip(),))
                     conn.commit()
                     conn.close()
                     log_action(new_rig.strip(), "Rig Added to Database")
@@ -171,11 +175,9 @@ if is_admin:
             df_in = pd.read_csv(up)
             df_in = df_in.loc[:, ~df_in.columns.duplicated()]
             
-            # Smartly determine the Rig Name column even if the CSV header is wrong
             r_col = 'Rig Name'
             if r_col not in df_in.columns:
                 r_col = df_in.columns[0]
-                st.sidebar.warning(f"'Rig Name' column not found. Defaulting to first column: '{r_col}'")
             
             conn = get_connection()
             cursor = conn.cursor()
@@ -200,7 +202,7 @@ if is_admin:
                         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ''', (
                         r_name,
-                        "Available", # Setting standard default status
+                        "Available",
                         get_val('Column 1'),
                         get_val('Off-Site Location Name'),
                         get_val('Off-Stie Location Address'),
@@ -295,7 +297,6 @@ with tab_checkout:
             damage = c2.selectbox("Is there any damage to the rig?", damage_options)
             
             if st.form_submit_button("Check Out"):
-                
                 required_dropdowns = {
                     "Configured to off-site Wi-Fi": wifi,
                     "Appropriate clothing/shoes": gear,
@@ -349,14 +350,14 @@ with tab_checkout:
                     st.success(f"{selected_rig} deployed to {assignee}.")
                     st.rerun()
     else:
-        st.info("No rigs currently available in the system. Use the Admin controls to add hardware.")
+        st.info("No rigs currently available in the system.")
 
 with tab_dash:
     st.subheader("Fleet Status")
     fleet_data = fetch_fleet()
     
     if fleet_data.empty:
-        st.info("Fleet uninitialized or empty. Ensure you have imported or added rigs via the Admin portal.")
+        st.info("Fleet is empty.")
     else:
         if is_admin:
             st.info("Admin Mode Active: All fields and columns are visible and editable.")
@@ -478,7 +479,7 @@ with tab_service:
                 st.success(f"{srv_rig} status successfully updated to {new_status}.")
                 st.rerun()
     else:
-        st.info("No available rigs to report. Ensure rigs exist in the system.")
+        st.info("No available rigs to report.")
 
 if is_admin:
     with tabs[4]:
@@ -510,3 +511,5 @@ if is_admin:
                 file_name="audit_log.csv",
                 mime="text/csv"
             )
+
+```
