@@ -34,6 +34,8 @@ COLUMNS = {
 def init_db():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
+    
+    # Create main fleet table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS fleet (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -42,6 +44,7 @@ def init_db():
         )
     ''')
     
+    # Ensure all columns exist in fleet table
     cursor.execute("PRAGMA table_info(fleet)")
     existing = [col[1] for col in cursor.fetchall()]
     
@@ -49,6 +52,28 @@ def init_db():
         if col_id not in existing and col_id != "id":
             cursor.execute(f"ALTER TABLE fleet ADD COLUMN {col_id} TEXT DEFAULT ''")
             
+    # Create History / Audit Log table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS audit_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT,
+            rig_name TEXT,
+            action TEXT,
+            assigned_to TEXT,
+            notes TEXT
+        )
+    ''')
+            
+    conn.commit()
+    conn.close()
+
+def log_action(rig_name, action, assigned_to="", notes=""):
+    conn = sqlite3.connect(DB_NAME)
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    conn.execute(
+        "INSERT INTO audit_log (timestamp, rig_name, action, assigned_to, notes) VALUES (?, ?, ?, ?, ?)",
+        (timestamp, rig_name, action, assigned_to, notes)
+    )
     conn.commit()
     conn.close()
 
@@ -96,6 +121,7 @@ if is_admin:
                     conn.execute("INSERT INTO fleet (rig_name) VALUES (?)", (new_rig.strip(),))
                     conn.commit()
                     conn.close()
+                    log_action(new_rig.strip(), "Rig Added to Database")
                     st.sidebar.success(f"Added {new_rig.strip()}")
                     st.rerun()
                 except sqlite3.IntegrityError:
@@ -116,6 +142,7 @@ if is_admin:
                 conn.execute("DELETE FROM fleet WHERE rig_name=?", (del_rig,))
                 conn.commit()
                 conn.close()
+                log_action(del_rig, "Rig Deleted from Database")
                 st.sidebar.success(f"Deleted {del_rig}")
                 st.rerun()
         else:
@@ -176,6 +203,7 @@ if is_admin:
                     
             conn.commit()
             conn.close()
+            log_action("Bulk Import", f"CSV processed, {added_count} rigs updated/imported")
             st.sidebar.success(f"Successfully imported/updated {added_count} rigs.")
             st.rerun()
 
@@ -193,7 +221,12 @@ if is_admin:
         )
 
 # --- MAIN TABS ---
-tab_checkout, tab_dash, tab_return, tab_service = st.tabs(["Check Out", "Dashboard", "Return", "Needs Servicing"])
+tab_names = ["Check Out", "Dashboard", "Return", "Needs Servicing"]
+if is_admin:
+    tab_names.append("History Log")
+
+tabs = st.tabs(tab_names)
+tab_checkout, tab_dash, tab_return, tab_service = tabs[0], tabs[1], tabs[2], tabs[3]
 
 with tab_checkout:
     st.subheader("Deploy Hardware")
@@ -215,47 +248,83 @@ with tab_checkout:
                 lead_num = st.text_input("Shift Lead's Number")
                 
             st.write("---")
-            st.caption("Safety & Technical Checklist")
+            st.caption("Safety & Technical Checklist (All Fields Required)")
+            
+            yn_options = ["", "Yes", "No"]
+            damage_options = ["", "No", "Yes"]
             
             c1, c2, c3 = st.columns(3)
-            wifi = c1.selectbox("Configured to off-site Wi-Fi?", ["Yes", "No"])
-            gear = c2.selectbox("Appropriate clothing/shoes?", ["Yes", "No"])
-            batt = c3.selectbox("2 batteries fully charged?", ["Yes", "No"])
+            wifi = c1.selectbox("Configured to off-site Wi-Fi?", yn_options)
+            gear = c2.selectbox("Appropriate clothing/shoes?", yn_options)
+            batt = c3.selectbox("2 batteries fully charged?", yn_options)
             
-            hotspot = c1.selectbox("Able to connect on hotspot?", ["Yes", "No"])
-            test_rec = c2.selectbox("Run test recording (30s)?", ["Yes", "No"])
-            servsafe = c3.selectbox("ServSafe food handler's card?", ["Yes", "No"])
+            hotspot = c1.selectbox("Able to connect on hotspot?", yn_options)
+            test_rec = c2.selectbox("Run test recording (30s)?", yn_options)
+            servsafe = c3.selectbox("ServSafe food handler's card?", yn_options)
             
-            harass = c1.selectbox("Completed sexual harassment training?", ["Yes", "No"])
-            violence = c2.selectbox("Completed workplace violence training?", ["Yes", "No"])
-            home_wifi = c3.selectbox("Reliable WiFi/Ethernet at home?", ["Yes", "No"])
+            harass = c1.selectbox("Completed sexual harassment training?", yn_options)
+            violence = c2.selectbox("Completed workplace violence training?", yn_options)
+            home_wifi = c3.selectbox("Reliable WiFi/Ethernet at home?", yn_options)
             
-            overnight = c1.selectbox("Can charge/upload overnight?", ["Yes", "No"])
-            damage = c2.selectbox("Is there any damage to the rig?", ["No", "Yes"])
+            overnight = c1.selectbox("Can charge/upload overnight?", yn_options)
+            damage = c2.selectbox("Is there any damage to the rig?", damage_options)
             
             if st.form_submit_button("Check Out"):
-                payload = {
-                    "status": "Deployed",
-                    "assigned_to": assignee,
-                    "location": loc,
-                    "address": addr,
-                    "shift_lead": lead,
-                    "lead_number": lead_num,
-                    "damage_notes": damage,
-                    "wifi_configured": wifi,
-                    "clothing_shoes": gear,
-                    "batteries_charged": batt,
-                    "hotspot_connect": hotspot,
-                    "test_recording": test_rec,
-                    "servsafe_card": servsafe,
-                    "sexual_harassment_training": harass,
-                    "workplace_violence_training": violence,
-                    "home_wifi": home_wifi,
-                    "overnight_charge": overnight
+                
+                # Validation mapping
+                required_dropdowns = {
+                    "Configured to off-site Wi-Fi": wifi,
+                    "Appropriate clothing/shoes": gear,
+                    "2 batteries fully charged": batt,
+                    "Able to connect on hotspot": hotspot,
+                    "Run test recording (30s)": test_rec,
+                    "ServSafe food handler's card": servsafe,
+                    "Completed sexual harassment training": harass,
+                    "Completed workplace violence training": violence,
+                    "Reliable WiFi/Ethernet at home": home_wifi,
+                    "Can charge/upload overnight": overnight,
+                    "Is there any damage to the rig": damage
                 }
-                update_rig_state(selected_rig, payload)
-                st.success(f"{selected_rig} deployed to {assignee}.")
-                st.rerun()
+                
+                missing_fields = [k for k, v in required_dropdowns.items() if v == ""]
+                
+                if not assignee.strip():
+                    st.error("Submission Failed: 'Assignee Name' is required.")
+                elif missing_fields:
+                    st.error(f"Submission Failed: Please select an option for the following required questions: {', '.join(missing_fields)}")
+                else:
+                    payload = {
+                        "status": "Deployed",
+                        "assigned_to": assignee,
+                        "location": loc,
+                        "address": addr,
+                        "shift_lead": lead,
+                        "lead_number": lead_num,
+                        "damage_notes": damage,
+                        "wifi_configured": wifi,
+                        "clothing_shoes": gear,
+                        "batteries_charged": batt,
+                        "hotspot_connect": hotspot,
+                        "test_recording": test_rec,
+                        "servsafe_card": servsafe,
+                        "sexual_harassment_training": harass,
+                        "workplace_violence_training": violence,
+                        "home_wifi": home_wifi,
+                        "overnight_charge": overnight
+                    }
+                    
+                    # Formatting the details for the audit log
+                    log_details = (
+                        f"Location: {loc} | Address: {addr} | Lead: {lead} ({lead_num})\n"
+                        f"Checklist Answers: Wi-Fi ({wifi}), Gear ({gear}), Batteries ({batt}), Hotspot ({hotspot}), "
+                        f"Test Rec ({test_rec}), ServSafe ({servsafe}), Harassment Trng ({harass}), Violence Trng ({violence}), "
+                        f"Home Wi-Fi ({home_wifi}), Overnight Chg ({overnight}), Damage ({damage})"
+                    )
+                    
+                    update_rig_state(selected_rig, payload)
+                    log_action(selected_rig, "Deployed", assignee, log_details)
+                    st.success(f"{selected_rig} deployed to {assignee}.")
+                    st.rerun()
     else:
         st.info("No rigs currently available.")
 
@@ -308,6 +377,7 @@ with tab_dash:
                     if not row.equals(orig_row):
                         update_payload = row.drop(["rig_name", "last_updated"]).to_dict()
                         update_rig_state(row['rig_name'], update_payload)
+                        log_action(row['rig_name'], f"Admin Table Edit -> Status: {row['status']}", row['assigned_to'])
                         
                 st.success("Database updated successfully!")
                 st.rerun()
@@ -315,7 +385,6 @@ with tab_dash:
             # Standard User View
             display_df = fleet_data.rename(columns=COLUMNS)
             
-            # Location is now before Last Updated
             visible_columns = [
                 "Rig Name", 
                 "Status", 
@@ -360,6 +429,7 @@ with tab_return:
                     "overnight_charge": ""
                 }
                 update_rig_state(return_rig, payload)
+                log_action(return_rig, "Returned", "", return_notes)
                 st.success(f"{return_rig} has been returned and is now Available.")
                 st.rerun()
     else:
@@ -385,8 +455,41 @@ with tab_service:
                     payload["damage_notes"] = srv_notes
                 
                 update_rig_state(srv_rig, payload)
+                log_action(srv_rig, f"Status updated to {new_status}", "", srv_notes)
                 st.success(f"{srv_rig} status successfully updated to {new_status}.")
                 st.rerun()
     else:
         st.info("No available rigs to report. Rigs must be returned before they can be flagged for servicing.")
+
+# Render the 5th tab only if admin is logged in
+if is_admin:
+    with tabs[4]:
+        st.subheader("Exchange History Log")
         
+        conn = sqlite3.connect(DB_NAME)
+        log_df = pd.read_sql_query('''
+            SELECT 
+                timestamp as Timestamp, 
+                rig_name as "Rig Name", 
+                action as Action, 
+                assigned_to as "Assigned To", 
+                notes as Notes 
+            FROM audit_log 
+            ORDER BY id DESC
+        ''', conn)
+        conn.close()
+        
+        if log_df.empty:
+            st.info("No actions have been logged yet.")
+        else:
+            st.dataframe(log_df, use_container_width=True, hide_index=True)
+            
+            # Export Log CSV Button
+            csv_buffer = io.StringIO()
+            log_df.to_csv(csv_buffer, index=False)
+            st.download_button(
+                label="Download Log CSV",
+                data=csv_buffer.getvalue(),
+                file_name="audit_log.csv",
+                mime="text/csv"
+            )
