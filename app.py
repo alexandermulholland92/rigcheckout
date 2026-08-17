@@ -5,7 +5,6 @@ from datetime import datetime
 import io
 
 # --- CONFIGURATION ---
-# This sets the clean Title for your browser tab and link previews!
 st.set_page_config(page_title="Rig Checkout System", layout="wide")
 DB_NAME = "inventory.db"
 
@@ -32,49 +31,41 @@ COLUMNS = {
     "overnight_charge": "Overnight Charge"
 }
 
-# Add this decorator so Streamlit only runs this once per server start!
-@st.cache_resource
 def init_db():
-    # Added a timeout to prevent the "database is locked" OperationalError
-    conn = sqlite3.connect(DB_NAME, timeout=10)
+    conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     
-    try:
-        # Create main fleet table
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS fleet (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                rig_name TEXT UNIQUE,
-                status TEXT DEFAULT 'Available'
-            )
-        ''')
-        
-        # Ensure all columns exist in fleet table
-        cursor.execute("PRAGMA table_info(fleet)")
-        existing = [col[1] for col in cursor.fetchall()]
-        
-        for col_id in COLUMNS.keys():
-            if col_id not in existing and col_id != "id":
-                # Wrapped col_id in quotes to prevent syntax errors
-                cursor.execute(f'ALTER TABLE fleet ADD COLUMN "{col_id}" TEXT DEFAULT ""')
-                
-        # Create History / Audit Log table
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS audit_log (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp TEXT,
-                rig_name TEXT,
-                action TEXT,
-                assigned_to TEXT,
-                notes TEXT
-            )
-        ''')
-                
-        conn.commit()
-    except Exception as e:
-        st.error(f"Database Error: {e}")
-    finally:
-        conn.close()    ''')
+    # Create main fleet table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS fleet (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            rig_name TEXT UNIQUE,
+            status TEXT DEFAULT 'Available'
+        )
+    ''')
+    
+    # Ensure all columns exist in fleet table safely
+    cursor.execute("PRAGMA table_info(fleet)")
+    existing = [col[1] for col in cursor.fetchall()]
+    
+    for col_id in COLUMNS.keys():
+        if col_id not in existing and col_id != "id":
+            try:
+                cursor.execute(f"ALTER TABLE fleet ADD COLUMN {col_id} TEXT DEFAULT ''")
+            except sqlite3.OperationalError:
+                pass # Skip if column already exists
+            
+    # Create History / Audit Log table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS audit_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT,
+            rig_name TEXT,
+            action TEXT,
+            assigned_to TEXT,
+            notes TEXT
+        )
+    ''')
             
     conn.commit()
     conn.close()
@@ -91,7 +82,6 @@ def log_action(rig_name, action, assigned_to="", notes=""):
 
 def fetch_fleet():
     conn = sqlite3.connect(DB_NAME)
-    # Sorted alphabetically by rig name
     query = f"SELECT {', '.join(COLUMNS.keys())} FROM fleet ORDER BY rig_name"
     df = pd.read_sql_query(query, conn)
     conn.close()
@@ -262,7 +252,6 @@ with tab_checkout:
             st.write("---")
             st.caption("Safety & Technical Checklist (All Fields Required)")
             
-            # Start dropdowns as blank values
             yn_options = ["", "Yes", "No"]
             damage_options = ["", "No", "Yes"]
             
@@ -284,7 +273,6 @@ with tab_checkout:
             
             if st.form_submit_button("Check Out"):
                 
-                # Validation mapping
                 required_dropdowns = {
                     "Configured to off-site Wi-Fi": wifi,
                     "Appropriate clothing/shoes": gear,
@@ -326,7 +314,6 @@ with tab_checkout:
                         "overnight_charge": overnight
                     }
                     
-                    # Formatting the details for the audit log
                     log_details = (
                         f"Location: {loc} | Address: {addr} | Lead: {lead} ({lead_num})\n"
                         f"Checklist Answers: Wi-Fi ({wifi}), Gear ({gear}), Batteries ({batt}), Hotspot ({hotspot}), "
@@ -395,9 +382,7 @@ with tab_dash:
                 st.success("Database updated successfully!")
                 st.rerun()
         else:
-            # Standard User View
             display_df = fleet_data.rename(columns=COLUMNS)
-            
             visible_columns = [
                 "Rig Name", 
                 "Status", 
@@ -405,9 +390,7 @@ with tab_dash:
                 "Location",
                 "Last Updated"
             ]
-            
             display_df = display_df[visible_columns]
-            
             st.dataframe(display_df, use_container_width=True, hide_index=True)
 
 with tab_return:
@@ -474,7 +457,6 @@ with tab_service:
     else:
         st.info("No available rigs to report. Rigs must be returned before they can be flagged for servicing.")
 
-# Render the 5th tab only if admin is logged in
 if is_admin:
     with tabs[4]:
         st.subheader("Exchange History Log")
@@ -497,7 +479,6 @@ if is_admin:
         else:
             st.dataframe(log_df, use_container_width=True, hide_index=True)
             
-            # Export Log CSV Button
             csv_buffer = io.StringIO()
             log_df.to_csv(csv_buffer, index=False)
             st.download_button(
