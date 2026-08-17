@@ -8,7 +8,7 @@ import io
 st.set_page_config(page_title="Rig Checkout System", layout="wide")
 DB_NAME = "inventory.db"
 
-# Define the full schema based on the CSV headers
+# Define the full schema
 COLUMNS = {
     "rig_name": "Rig Name",
     "status": "Status",
@@ -47,7 +47,7 @@ def init_db():
         )
     ''')
     
-    # Ensure all columns exist in fleet table safely
+    # Ensure all columns exist safely
     cursor.execute("PRAGMA table_info(fleet)")
     existing = [col[1] for col in cursor.fetchall()]
     
@@ -58,7 +58,7 @@ def init_db():
             except sqlite3.OperationalError:
                 pass 
             
-    # Create History / Audit Log table
+    # Create Audit Log table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS audit_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -69,11 +69,9 @@ def init_db():
             notes TEXT
         )
     ''')
-            
     conn.commit()
     conn.close()
 
-# Initialize database on load (without forcing fake rigs)
 init_db()
 
 def log_action(rig_name, action, assigned_to="", notes=""):
@@ -92,9 +90,24 @@ def log_action(rig_name, action, assigned_to="", notes=""):
 def fetch_fleet():
     try:
         conn = get_connection()
-        query = f"SELECT {', '.join(COLUMNS.keys())} FROM fleet ORDER BY rig_name"
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA table_info(fleet)")
+        existing_cols = [col[1] for col in cursor.fetchall()]
+        
+        # Only select columns that actually exist to prevent crashes
+        valid_selects = [c for c in COLUMNS.keys() if c in existing_cols]
+        if not valid_selects:
+            valid_selects = ["rig_name", "status"]
+            
+        query = f"SELECT {', '.join([f'\"{c}\"' for c in valid_selects] )} FROM fleet ORDER BY rig_name"
         df = pd.read_sql_query(query, conn)
         conn.close()
+        
+        # Fill any missing UI columns gracefully
+        for col_id in COLUMNS.keys():
+            if col_id not in df.columns:
+                df[col_id] = ""
+                
         return df
     except Exception as e:
         st.error(f"Failed to fetch fleet data: {e}")
@@ -124,7 +137,6 @@ if is_admin:
     st.sidebar.divider()
     st.sidebar.subheader("Admin Controls")
     
-# 1. Add Single Rig
     with st.sidebar.expander("Add Single Rig"):
         new_rig = st.text_input("New Rig Name")
         if st.button("Add Rig"):
@@ -142,7 +154,6 @@ if is_admin:
             else:
                 st.sidebar.warning("Please enter a rig name.")
 
-# 2. Delete Rig
     with st.sidebar.expander("Delete Rig"):
         conn = get_connection()
         all_rigs = [r[0] for r in conn.execute("SELECT rig_name FROM fleet ORDER BY rig_name").fetchall()]
@@ -161,7 +172,6 @@ if is_admin:
         else:
             st.sidebar.info("No rigs in database.")
     
-# 3. Bulk Import CSV
     with st.sidebar.expander("Bulk Import CSV"):
         up = st.file_uploader("Upload CSV Sheet", type=["csv"])
         if up and st.button("Process Import"):
@@ -224,7 +234,6 @@ if is_admin:
             st.sidebar.success(f"Successfully imported {added_count} rigs.")
             st.rerun()
 
-# 4. Export CSV
     with st.sidebar.expander("Export CSV"):
         fleet_df = fetch_fleet()
         if not fleet_df.empty:
