@@ -31,8 +31,12 @@ COLUMNS = {
     "overnight_charge": "Overnight Charge"
 }
 
+def get_connection():
+    # Adding a 20-second timeout prevents the "database is locked" crashes
+    return sqlite3.connect(DB_NAME, timeout=20)
+
 def init_db():
-    conn = sqlite3.connect(DB_NAME)
+    conn = get_connection()
     cursor = conn.cursor()
     
     # Create main fleet table
@@ -53,7 +57,7 @@ def init_db():
             try:
                 cursor.execute(f"ALTER TABLE fleet ADD COLUMN {col_id} TEXT DEFAULT ''")
             except sqlite3.OperationalError:
-                pass # Skip if column already exists
+                pass # Skip safely if column already exists
             
     # Create History / Audit Log table
     cursor.execute('''
@@ -70,25 +74,37 @@ def init_db():
     conn.commit()
     conn.close()
 
+# Only run database initialization ONCE per user session to prevent overload
+if "db_initialized" not in st.session_state:
+    init_db()
+    st.session_state.db_initialized = True
+
 def log_action(rig_name, action, assigned_to="", notes=""):
-    conn = sqlite3.connect(DB_NAME)
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    conn.execute(
-        "INSERT INTO audit_log (timestamp, rig_name, action, assigned_to, notes) VALUES (?, ?, ?, ?, ?)",
-        (timestamp, rig_name, action, assigned_to, notes)
-    )
-    conn.commit()
-    conn.close()
+    try:
+        conn = get_connection()
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        conn.execute(
+            "INSERT INTO audit_log (timestamp, rig_name, action, assigned_to, notes) VALUES (?, ?, ?, ?, ?)",
+            (timestamp, rig_name, action, assigned_to, notes)
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        st.error(f"Audit Log Error: {e}")
 
 def fetch_fleet():
-    conn = sqlite3.connect(DB_NAME)
-    query = f"SELECT {', '.join(COLUMNS.keys())} FROM fleet ORDER BY rig_name"
-    df = pd.read_sql_query(query, conn)
-    conn.close()
-    return df
+    try:
+        conn = get_connection()
+        query = f"SELECT {', '.join(COLUMNS.keys())} FROM fleet ORDER BY rig_name"
+        df = pd.read_sql_query(query, conn)
+        conn.close()
+        return df
+    except Exception as e:
+        st.error(f"Failed to fetch fleet data: {e}")
+        return pd.DataFrame()
 
 def update_rig_state(rig_name, data_dict):
-    conn = sqlite3.connect(DB_NAME)
+    conn = get_connection()
     cursor = conn.cursor()
     data_dict["last_updated"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
@@ -99,8 +115,6 @@ def update_rig_state(rig_name, data_dict):
     cursor.execute(f"UPDATE fleet SET {placeholders} WHERE rig_name=?", values)
     conn.commit()
     conn.close()
-
-init_db()
 
 st.title("Rig Checkout List")
 
@@ -119,7 +133,7 @@ if is_admin:
         if st.button("Add Rig"):
             if new_rig.strip():
                 try:
-                    conn = sqlite3.connect(DB_NAME)
+                    conn = get_connection()
                     conn.execute("INSERT INTO fleet (rig_name) VALUES (?)", (new_rig.strip(),))
                     conn.commit()
                     conn.close()
@@ -133,14 +147,14 @@ if is_admin:
 
 # 2. Delete Rig
     with st.sidebar.expander("Delete Rig"):
-        conn = sqlite3.connect(DB_NAME)
+        conn = get_connection()
         all_rigs = [r[0] for r in conn.execute("SELECT rig_name FROM fleet ORDER BY rig_name").fetchall()]
         conn.close()
         
         if all_rigs:
             del_rig = st.selectbox("Select Rig to Delete", all_rigs)
             if st.button("Delete Rig"):
-                conn = sqlite3.connect(DB_NAME)
+                conn = get_connection()
                 conn.execute("DELETE FROM fleet WHERE rig_name=?", (del_rig,))
                 conn.commit()
                 conn.close()
@@ -157,12 +171,18 @@ if is_admin:
             df_in = pd.read_csv(up)
             df_in = df_in.loc[:, ~df_in.columns.duplicated()]
             
-            conn = sqlite3.connect(DB_NAME)
+            # Smartly determine the Rig Name column even if the CSV header is wrong
+            r_col = 'Rig Name'
+            if r_col not in df_in.columns:
+                r_col = df_in.columns[0]
+                st.sidebar.warning(f"'Rig Name' column not found. Defaulting to first column: '{r_col}'")
+            
+            conn = get_connection()
             cursor = conn.cursor()
             
             added_count = 0
             for _, row in df_in.iterrows():
-                r_name = str(row.get('Rig Name', '')).strip()
+                r_name = str(row.get(r_col, '')).strip()
                 if not r_name or r_name.lower() == 'nan':
                     continue
                 
@@ -180,7 +200,7 @@ if is_admin:
                         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ''', (
                         r_name,
-                        "Deployed",
+                        "Available", # Setting standard default status
                         get_val('Column 1'),
                         get_val('Off-Site Location Name'),
                         get_val('Off-Stie Location Address'),
@@ -205,22 +225,25 @@ if is_admin:
                     
             conn.commit()
             conn.close()
-            log_action("Bulk Import", f"CSV processed, {added_count} rigs updated/imported")
-            st.sidebar.success(f"Successfully imported/updated {added_count} rigs.")
+            log_action("Bulk Import", f"CSV processed, {added_count} rigs imported")
+            st.sidebar.success(f"Successfully imported {added_count} rigs.")
             st.rerun()
 
 # 4. Export CSV
     with st.sidebar.expander("Export CSV"):
         fleet_df = fetch_fleet()
-        export_df = fleet_df.rename(columns=COLUMNS)
-        csv_buffer = io.StringIO()
-        export_df.to_csv(csv_buffer, index=False)
-        st.download_button(
-            label="Download Full Fleet CSV",
-            data=csv_buffer.getvalue(),
-            file_name="fleet_export.csv",
-            mime="text/csv"
-        )
+        if not fleet_df.empty:
+            export_df = fleet_df.rename(columns=COLUMNS)
+            csv_buffer = io.StringIO()
+            export_df.to_csv(csv_buffer, index=False)
+            st.download_button(
+                label="Download Full Fleet CSV",
+                data=csv_buffer.getvalue(),
+                file_name="fleet_export.csv",
+                mime="text/csv"
+            )
+        else:
+            st.sidebar.info("Database is empty. Nothing to export.")
 
 # --- MAIN TABS ---
 tab_names = ["Check Out", "Dashboard", "Return", "Needs Servicing"]
@@ -232,7 +255,7 @@ tab_checkout, tab_dash, tab_return, tab_service = tabs[0], tabs[1], tabs[2], tab
 
 with tab_checkout:
     st.subheader("Deploy Hardware")
-    conn = sqlite3.connect(DB_NAME)
+    conn = get_connection()
     available_rigs = [r[0] for r in conn.execute("SELECT rig_name FROM fleet WHERE status='Available' ORDER BY rig_name").fetchall()]
     conn.close()
     
@@ -326,14 +349,14 @@ with tab_checkout:
                     st.success(f"{selected_rig} deployed to {assignee}.")
                     st.rerun()
     else:
-        st.info("No rigs currently available.")
+        st.info("No rigs currently available in the system. Use the Admin controls to add hardware.")
 
 with tab_dash:
     st.subheader("Fleet Status")
     fleet_data = fetch_fleet()
     
     if fleet_data.empty:
-        st.info("Fleet uninitialized. Provision hardware via the Admin portal.")
+        st.info("Fleet uninitialized or empty. Ensure you have imported or added rigs via the Admin portal.")
     else:
         if is_admin:
             st.info("Admin Mode Active: All fields and columns are visible and editable.")
@@ -395,7 +418,7 @@ with tab_dash:
 
 with tab_return:
     st.subheader("Return Hardware")
-    conn = sqlite3.connect(DB_NAME)
+    conn = get_connection()
     deployed_rigs = [r[0] for r in conn.execute("SELECT rig_name FROM fleet WHERE status='Deployed' ORDER BY rig_name").fetchall()]
     conn.close()
     
@@ -429,13 +452,13 @@ with tab_return:
                 st.success(f"{return_rig} has been returned and is now Available.")
                 st.rerun()
     else:
-        st.info("No rigs are currently deployed.")
+        st.info("No rigs are currently marked as deployed.")
 
 with tab_service:
     st.subheader("Mark Rig for Servicing")
     st.write("Use this section to flag an available rig that needs maintenance, or mark a serviced rig as available again.")
     
-    conn = sqlite3.connect(DB_NAME)
+    conn = get_connection()
     serviceable_rigs = [r[0] for r in conn.execute("SELECT rig_name FROM fleet WHERE status IN ('Available', 'Needs Servicing') ORDER BY rig_name").fetchall()]
     conn.close()
     
@@ -455,13 +478,13 @@ with tab_service:
                 st.success(f"{srv_rig} status successfully updated to {new_status}.")
                 st.rerun()
     else:
-        st.info("No available rigs to report. Rigs must be returned before they can be flagged for servicing.")
+        st.info("No available rigs to report. Ensure rigs exist in the system.")
 
 if is_admin:
     with tabs[4]:
         st.subheader("Exchange History Log")
         
-        conn = sqlite3.connect(DB_NAME)
+        conn = get_connection()
         log_df = pd.read_sql_query('''
             SELECT 
                 timestamp as Timestamp, 
