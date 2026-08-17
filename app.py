@@ -275,6 +275,8 @@ try:
         
         if available_rigs:
             with st.form("checkout_form"):
+                st.caption("All fields in this form are required to successfully deploy a rig.")
+                
                 rig_options = [""] + available_rigs
                 selected_rig = st.selectbox("Select Rig", rig_options)
                 
@@ -288,7 +290,7 @@ try:
                     lead_num = st.text_input("Shift Lead's Number")
                     
                 st.write("---")
-                st.caption("Safety & Technical Checklist (All Fields Required)")
+                st.caption("Safety & Technical Checklist")
                 
                 yn_options = ["", "Yes", "No"]
                 damage_options = ["", "No", "Yes"]
@@ -310,6 +312,16 @@ try:
                 damage = c2.selectbox("Is there any damage to the rig?", damage_options)
                 
                 if st.form_submit_button("Check Out"):
+                    # Dictionary to track text fields that must be filled
+                    required_text_fields = {
+                        "Assignee Name": assignee,
+                        "Off-Site Location Name": loc,
+                        "Off-Site Location Address": addr,
+                        "Shift Lead's Name": lead,
+                        "Shift Lead's Number": lead_num
+                    }
+                    
+                    # Dictionary to track dropdowns that must be answered
                     required_dropdowns = {
                         "Configured to off-site Wi-Fi": wifi,
                         "Appropriate clothing/shoes": gear,
@@ -324,14 +336,16 @@ try:
                         "Is there any damage to the rig": damage
                     }
                     
-                    missing_fields = [k for k, v in required_dropdowns.items() if v == ""]
+                    # Identify missing entries
+                    missing_text = [k for k, v in required_text_fields.items() if not v.strip()]
+                    missing_dropdowns = [k for k, v in required_dropdowns.items() if v == ""]
                     
                     if not selected_rig:
                         st.error("Submission Failed: Please select a rig to deploy.")
-                    elif not assignee.strip():
-                        st.error("Submission Failed: 'Assignee Name' is required.")
-                    elif missing_fields:
-                        st.error(f"Submission Failed: Please select an option for the following required questions: {', '.join(missing_fields)}")
+                    elif missing_text:
+                        st.error(f"Submission Failed: The following text fields are required: {', '.join(missing_text)}")
+                    elif missing_dropdowns:
+                        st.error(f"Submission Failed: Please select an option for the following checklist questions: {', '.join(missing_dropdowns)}")
                     else:
                         payload = {
                             "status": "Deployed",
