@@ -9,6 +9,15 @@ import traceback
 st.set_page_config(page_title="Rig Checkout System", layout="wide")
 DB_NAME = "inventory.db"
 
+def safe_rerun():
+    try:
+        st.rerun()
+    except AttributeError:
+        try:
+            st.experimental_rerun()
+        except Exception:
+            st.stop()
+
 COLUMNS = {
     "rig_name": "Rig Name",
     "status": "Status",
@@ -135,7 +144,7 @@ try:
                         conn.close()
                         log_action(new_rig.strip(), "Rig Added to Database")
                         st.sidebar.success(f"Added {new_rig.strip()}")
-                        st.rerun()
+                        safe_rerun()
                     except sqlite3.IntegrityError:
                         st.sidebar.error("Rig already exists.")
                 else:
@@ -155,7 +164,7 @@ try:
                     conn.close()
                     log_action(del_rig, "Rig Deleted from Database")
                     st.sidebar.success(f"Deleted {del_rig}")
-                    st.rerun()
+                    safe_rerun()
             else:
                 st.sidebar.info("No rigs in database.")
         
@@ -219,7 +228,7 @@ try:
                 conn.close()
                 log_action("Bulk Import", f"CSV processed, {added_count} rigs imported")
                 st.sidebar.success(f"Successfully imported {added_count} rigs.")
-                st.rerun()
+                safe_rerun()
 
         with st.sidebar.expander("Export CSV"):
             fleet_df = fetch_fleet()
@@ -337,7 +346,7 @@ try:
                         update_rig_state(selected_rig, payload)
                         log_action(selected_rig, "Deployed", assignee, log_details)
                         st.success(f"{selected_rig} deployed to {assignee}.")
-                        st.rerun()
+                        safe_rerun()
         else:
             st.info("No rigs currently available in the system. Use the Admin controls to add hardware or import your CSV list.")
 
@@ -393,7 +402,7 @@ try:
                             log_action(row['rig_name'], f"Admin Table Edit -> Status: {row['status']}", row['assigned_to'])
                             
                     st.success("Database updated successfully!")
-                    st.rerun()
+                    safe_rerun()
             else:
                 display_df = fleet_data.rename(columns=COLUMNS)
                 visible_columns = [
@@ -440,7 +449,7 @@ try:
                     update_rig_state(return_rig, payload)
                     log_action(return_rig, "Returned", "", return_notes)
                     st.success(f"{return_rig} has been returned and is now Available.")
-                    st.rerun()
+                    safe_rerun()
         else:
             st.info("No rigs are currently marked as deployed.")
 
@@ -466,7 +475,7 @@ try:
                     update_rig_state(srv_rig, payload)
                     log_action(srv_rig, f"Status updated to {new_status}", "", srv_notes)
                     st.success(f"{srv_rig} status successfully updated to {new_status}.")
-                    st.rerun()
+                    safe_rerun()
         else:
             st.info("No available rigs to report.")
 
