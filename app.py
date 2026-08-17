@@ -261,7 +261,6 @@ try:
         
         if available_rigs:
             with st.form("checkout_form"):
-                # Prepend an empty string so the selectbox is blank by default
                 rig_options = [""] + available_rigs
                 selected_rig = st.selectbox("Select Rig", rig_options)
                 
@@ -467,19 +466,23 @@ try:
         
         if serviceable_rigs:
             with st.form("service_form"):
-                srv_rig = st.selectbox("Select Rig", serviceable_rigs)
+                srv_rig_options = [""] + serviceable_rigs
+                srv_rig = st.selectbox("Select Rig", srv_rig_options)
                 new_status = st.selectbox("Update Status", ["Needs Servicing", "Available"])
                 srv_notes = st.text_area("Service / Damage Notes (Optional)")
                 
                 if st.form_submit_button("Update Status"):
-                    payload = {"status": new_status}
-                    if srv_notes.strip():
-                        payload["damage_notes"] = srv_notes
-                    
-                    update_rig_state(srv_rig, payload)
-                    log_action(srv_rig, f"Status updated to {new_status}", "", srv_notes)
-                    st.success(f"{srv_rig} status successfully updated to {new_status}.")
-                    safe_rerun()
+                    if not srv_rig:
+                        st.error("Submission Failed: Please select a rig.")
+                    else:
+                        payload = {"status": new_status}
+                        if srv_notes.strip():
+                            payload["damage_notes"] = srv_notes
+                        
+                        update_rig_state(srv_rig, payload)
+                        log_action(srv_rig, f"Status updated to {new_status}", "", srv_notes)
+                        st.success(f"{srv_rig} status successfully updated to {new_status}.")
+                        safe_rerun()
         else:
             st.info("No available rigs to report.")
 
