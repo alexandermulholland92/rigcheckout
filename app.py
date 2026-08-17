@@ -511,5 +511,3 @@ if is_admin:
                 file_name="audit_log.csv",
                 mime="text/csv"
             )
-
-```
