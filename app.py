@@ -5,6 +5,7 @@ from datetime import datetime
 import io
 
 # --- CONFIGURATION ---
+# This sets the clean Title for your browser tab and link previews!
 st.set_page_config(page_title="Rig Checkout System", layout="wide")
 DB_NAME = "inventory.db"
 
@@ -31,41 +32,46 @@ COLUMNS = {
     "overnight_charge": "Overnight Charge"
 }
 
+@st.cache_resource
 def init_db():
-    conn = sqlite3.connect(DB_NAME)
+    conn = sqlite3.connect(DB_NAME, timeout=10)
     cursor = conn.cursor()
     
-    # Create main fleet table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS fleet (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            rig_name TEXT UNIQUE,
-            status TEXT DEFAULT 'Available'
-        )
-    ''')
-    
-    # Ensure all columns exist in fleet table
-    cursor.execute("PRAGMA table_info(fleet)")
-    existing = [col[1] for col in cursor.fetchall()]
-    
-    for col_id in COLUMNS.keys():
-        if col_id not in existing and col_id != "id":
-            cursor.execute(f"ALTER TABLE fleet ADD COLUMN {col_id} TEXT DEFAULT ''")
-            
-    # Create History / Audit Log table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS audit_log (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            timestamp TEXT,
-            rig_name TEXT,
-            action TEXT,
-            assigned_to TEXT,
-            notes TEXT
-        )
-    ''')
-            
-    conn.commit()
-    conn.close()
+    try:
+        # Create main fleet table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS fleet (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                rig_name TEXT UNIQUE,
+                status TEXT DEFAULT 'Available'
+            )
+        ''')
+        
+        # Ensure all columns exist in fleet table
+        cursor.execute("PRAGMA table_info(fleet)")
+        existing = [col[1] for col in cursor.fetchall()]
+        
+        for col_id in COLUMNS.keys():
+            if col_id not in existing and col_id != "id":
+                cursor.execute(f'ALTER TABLE fleet ADD COLUMN "{col_id}" TEXT DEFAULT ""')
+                
+        # Create History / Audit Log table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS audit_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT,
+                rig_name TEXT,
+                action TEXT,
+                assigned_to TEXT,
+                notes TEXT
+            )
+        ''')
+                
+        conn.commit()
+    except Exception as e:
+        st.error(f"Database Error: {e}")
+    finally:
+        conn.close()
 
 def log_action(rig_name, action, assigned_to="", notes=""):
     conn = sqlite3.connect(DB_NAME)
@@ -90,7 +96,7 @@ def update_rig_state(rig_name, data_dict):
     cursor = conn.cursor()
     data_dict["last_updated"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
-    placeholders = ", ".join([f"{k}=?" for k in data_dict.keys()])
+    placeholders = ", ".join([f'"{k}"=?' for k in data_dict.keys()])
     values = list(data_dict.values())
     values.append(rig_name)
     
@@ -250,6 +256,7 @@ with tab_checkout:
             st.write("---")
             st.caption("Safety & Technical Checklist (All Fields Required)")
             
+            # Start dropdowns as blank values
             yn_options = ["", "Yes", "No"]
             damage_options = ["", "No", "Yes"]
             
