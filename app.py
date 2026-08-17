@@ -261,7 +261,9 @@ try:
         
         if available_rigs:
             with st.form("checkout_form"):
-                selected_rig = st.selectbox("Select Rig", available_rigs)
+                # Prepend an empty string so the selectbox is blank by default
+                rig_options = [""] + available_rigs
+                selected_rig = st.selectbox("Select Rig", rig_options)
                 
                 col1, col2 = st.columns(2)
                 with col1:
@@ -311,7 +313,9 @@ try:
                     
                     missing_fields = [k for k, v in required_dropdowns.items() if v == ""]
                     
-                    if not assignee.strip():
+                    if not selected_rig:
+                        st.error("Submission Failed: Please select a rig to deploy.")
+                    elif not assignee.strip():
                         st.error("Submission Failed: 'Assignee Name' is required.")
                     elif missing_fields:
                         st.error(f"Submission Failed: Please select an option for the following required questions: {', '.join(missing_fields)}")
