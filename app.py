@@ -469,18 +469,21 @@ try:
                 srv_rig_options = [""] + serviceable_rigs
                 srv_rig = st.selectbox("Select Rig", srv_rig_options)
                 new_status = st.selectbox("Update Status", ["Needs Servicing", "Available"])
-                srv_notes = st.text_area("Service / Damage Notes (Optional)")
+                srv_notes = st.text_area("Service / Damage Notes (Required)")
                 
                 if st.form_submit_button("Update Status"):
                     if not srv_rig:
                         st.error("Submission Failed: Please select a rig.")
+                    elif not srv_notes.strip():
+                        st.error("Submission Failed: 'Service / Damage Notes' is required.")
                     else:
-                        payload = {"status": new_status}
-                        if srv_notes.strip():
-                            payload["damage_notes"] = srv_notes
+                        payload = {
+                            "status": new_status,
+                            "damage_notes": srv_notes.strip()
+                        }
                         
                         update_rig_state(srv_rig, payload)
-                        log_action(srv_rig, f"Status updated to {new_status}", "", srv_notes)
+                        log_action(srv_rig, f"Status updated to {new_status}", "", srv_notes.strip())
                         st.success(f"{srv_rig} status successfully updated to {new_status}.")
                         safe_rerun()
         else:
