@@ -32,8 +32,10 @@ COLUMNS = {
     "overnight_charge": "Overnight Charge"
 }
 
+# Add this decorator so Streamlit only runs this once per server start!
 @st.cache_resource
 def init_db():
+    # Added a timeout to prevent the "database is locked" OperationalError
     conn = sqlite3.connect(DB_NAME, timeout=10)
     cursor = conn.cursor()
     
@@ -53,6 +55,7 @@ def init_db():
         
         for col_id in COLUMNS.keys():
             if col_id not in existing and col_id != "id":
+                # Wrapped col_id in quotes to prevent syntax errors
                 cursor.execute(f'ALTER TABLE fleet ADD COLUMN "{col_id}" TEXT DEFAULT ""')
                 
         # Create History / Audit Log table
@@ -71,7 +74,10 @@ def init_db():
     except Exception as e:
         st.error(f"Database Error: {e}")
     finally:
-        conn.close()
+        conn.close()    ''')
+            
+    conn.commit()
+    conn.close()
 
 def log_action(rig_name, action, assigned_to="", notes=""):
     conn = sqlite3.connect(DB_NAME)
@@ -96,7 +102,7 @@ def update_rig_state(rig_name, data_dict):
     cursor = conn.cursor()
     data_dict["last_updated"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
-    placeholders = ", ".join([f'"{k}"=?' for k in data_dict.keys()])
+    placeholders = ", ".join([f"{k}=?" for k in data_dict.keys()])
     values = list(data_dict.values())
     values.append(rig_name)
     
