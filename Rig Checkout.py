@@ -69,18 +69,11 @@ def init_db():
             notes TEXT
         )
     ''')
-    
-    # Automatically populate sample rigs if the database is empty so it's never blank
-    cursor.execute("SELECT COUNT(*) FROM fleet")
-    if cursor.fetchone()[0] == 0:
-        sample_rigs = ["Rig 1", "Rig 2", "Rig 3", "Rig 4", "Rig 5"]
-        for r in sample_rigs:
-            cursor.execute("INSERT OR IGNORE INTO fleet (rig_name, status) VALUES (?, 'Available')", (r,))
             
     conn.commit()
     conn.close()
 
-# Initialize database on load
+# Initialize database on load (without forcing fake rigs)
 init_db()
 
 def log_action(rig_name, action, assigned_to="", notes=""):
@@ -350,14 +343,14 @@ with tab_checkout:
                     st.success(f"{selected_rig} deployed to {assignee}.")
                     st.rerun()
     else:
-        st.info("No rigs currently available in the system.")
+        st.info("No rigs currently available in the system. Use the Admin controls to add hardware or import your CSV list.")
 
 with tab_dash:
     st.subheader("Fleet Status")
     fleet_data = fetch_fleet()
     
     if fleet_data.empty:
-        st.info("Fleet is empty.")
+        st.info("Fleet is empty. Use the sidebar Admin controls to import your device list CSV.")
     else:
         if is_admin:
             st.info("Admin Mode Active: All fields and columns are visible and editable.")
