@@ -277,7 +277,7 @@ try:
         
         if available_rigs:
             with st.form("checkout_form"):
-                st.caption("All fields in this form are required to successfully deploy a rig.")
+                st.caption("Please fill out all required text fields and checklist items to deploy a rig.")
                 
                 rig_options = [""] + available_rigs
                 selected_rig = st.selectbox("Select Rig", rig_options)
@@ -290,20 +290,11 @@ try:
                 with col2:
                     lead = st.text_input("Shift Lead's Name")
                     lead_num = st.text_input("Shift Lead's Number")
-                
-                st.write("---")
-                st.caption("Deployment Timing")
-                col_date, col_time = st.columns(2)
-                with col_date:
-                    est_return_date = st.date_input("Estimated Return Date", value=None)
-                with col_time:
-                    est_return_time = st.time_input("Estimated Return Time", value=None)
                     
                 st.write("---")
-                st.caption("Safety & Technical Checklist")
+                st.caption("Safety & Technical Checklist (Required)")
                 
                 yn_options = ["", "Yes", "No"]
-                damage_options = ["", "No", "Yes"]
                 
                 c1, c2, c3 = st.columns(3)
                 wifi = c1.selectbox("Configured to off-site Wi-Fi?", yn_options)
@@ -316,10 +307,19 @@ try:
                 
                 harass = c1.selectbox("Completed sexual harassment training?", yn_options)
                 violence = c2.selectbox("Completed workplace violence training?", yn_options)
-                home_wifi = c3.selectbox("Reliable WiFi/Ethernet at home?", yn_options)
+
+                st.write("---")
+                st.caption("Additional Details & Timing (Optional)")
                 
-                overnight = c1.selectbox("Can charge/upload overnight?", yn_options)
-                damage = c2.selectbox("Is there any damage to the rig?", damage_options)
+                c_opt1, c_opt2 = st.columns(2)
+                home_wifi = c_opt1.selectbox("Reliable WiFi/Ethernet at home?", yn_options)
+                overnight = c_opt2.selectbox("Can charge/upload overnight?", yn_options)
+                
+                col_date, col_time = st.columns(2)
+                with col_date:
+                    est_return_date = st.date_input("Estimated Return Date", value=None)
+                with col_time:
+                    est_return_time = st.time_input("Estimated Return Time", value=None)
                 
                 if st.form_submit_button("Check Out"):
                     # Dictionary to track text fields that must be filled
@@ -340,32 +340,28 @@ try:
                         "Run test recording (30s)": test_rec,
                         "ServSafe food handler's card": servsafe,
                         "Completed sexual harassment training": harass,
-                        "Completed workplace violence training": violence,
-                        "Reliable WiFi/Ethernet at home": home_wifi,
-                        "Can charge/upload overnight": overnight,
-                        "Is there any damage to the rig": damage
+                        "Completed workplace violence training": violence
                     }
                     
                     # Identify missing entries
                     missing_text = [k for k, v in required_text_fields.items() if not v.strip()]
                     missing_dropdowns = [k for k, v in required_dropdowns.items() if v == ""]
                     
-                    missing_datetime = []
-                    if est_return_date is None:
-                        missing_datetime.append("Estimated Return Date")
-                    if est_return_time is None:
-                        missing_datetime.append("Estimated Return Time")
-                    
                     if not selected_rig:
                         st.error("Submission Failed: Please select a rig to deploy.")
                     elif missing_text:
                         st.error(f"Submission Failed: The following text fields are required: {', '.join(missing_text)}")
-                    elif missing_datetime:
-                        st.error(f"Submission Failed: The following timing fields are required: {', '.join(missing_datetime)}")
                     elif missing_dropdowns:
                         st.error(f"Submission Failed: Please select an option for the following checklist questions: {', '.join(missing_dropdowns)}")
                     else:
-                        formatted_return = f"{est_return_date.strftime('%Y-%m-%d')} at {est_return_time.strftime('%I:%M %p')}"
+                        # Format optional date and time
+                        formatted_return = ""
+                        if est_return_date and est_return_time:
+                            formatted_return = f"{est_return_date.strftime('%Y-%m-%d')} at {est_return_time.strftime('%I:%M %p')}"
+                        elif est_return_date:
+                            formatted_return = est_return_date.strftime('%Y-%m-%d')
+                        elif est_return_time:
+                            formatted_return = est_return_time.strftime('%I:%M %p')
                         
                         payload = {
                             "status": "Deployed",
@@ -375,7 +371,6 @@ try:
                             "shift_lead": lead,
                             "lead_number": lead_num,
                             "estimated_return": formatted_return,
-                            "damage_notes": damage,
                             "wifi_configured": wifi,
                             "clothing_shoes": gear,
                             "batteries_charged": batt,
@@ -389,15 +384,20 @@ try:
                         }
                         
                         log_details = (
-                            f"Location: {loc} | Address: {addr} | Lead: {lead} ({lead_num}) | Return: {formatted_return}\n"
+                            f"Location: {loc} | Address: {addr} | Lead: {lead} ({lead_num}) | Est. Return: {formatted_return or 'N/A'}\n"
                             f"Checklist Answers: Wi-Fi ({wifi}), Gear ({gear}), Batteries ({batt}), Hotspot ({hotspot}), "
-                            f"Test Rec ({test_rec}), ServSafe ({servsafe}), Harassment Trng ({harass}), Violence Trng ({violence}), "
-                            f"Home Wi-Fi ({home_wifi}), Overnight Chg ({overnight}), Damage ({damage})"
+                            f"Test Rec ({test_rec}), ServSafe ({servsafe}), Harassment Trng ({harass}), Violence Trng ({violence})\n"
+                            f"Optional Info: Home Wi-Fi ({home_wifi or 'N/A'}), Overnight Chg ({overnight or 'N/A'})"
                         )
                         
                         update_rig_state(selected_rig, payload)
                         log_action(selected_rig, "Deployed", assignee, log_details)
-                        st.success(f"{selected_rig} deployed to {assignee} (Expected Return: {formatted_return}).")
+                        
+                        success_msg = f"{selected_rig} deployed to {assignee}."
+                        if formatted_return:
+                            success_msg += f" (Expected Return: {formatted_return})"
+                        st.success(success_msg)
+                        
                         safe_rerun()
         else:
             st.info("No rigs currently available in the system. Use the Admin controls to add hardware or import your CSV list.")
