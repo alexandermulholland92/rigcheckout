@@ -35,6 +35,7 @@ COLUMNS = {
     "address": "Location Address",
     "shift_lead": "Shift Lead",
     "lead_number": "Lead Number",
+    "estimated_return": "Estimated Return",
     "wifi_configured": "Wi-Fi Configured",
     "clothing_shoes": "Appropriate Gear",
     "batteries_charged": "Batteries Charged",
@@ -208,11 +209,11 @@ try:
                     try:
                         cursor.execute('''
                             INSERT OR REPLACE INTO fleet (
-                                rig_name, status, assigned_to, location, address, shift_lead, lead_number,
+                                rig_name, status, assigned_to, location, address, shift_lead, lead_number, estimated_return,
                                 wifi_configured, clothing_shoes, batteries_charged, hotspot_connect,
                                 test_recording, servsafe_card, sexual_harassment_training,
                                 workplace_violence_training, damage_notes, home_wifi, overnight_charge
-                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         ''', (
                             r_name,
                             "Available",
@@ -221,6 +222,7 @@ try:
                             get_val('Off-Stie Location Address'),
                             get_val("Off-Site Coordinating Shift Lead's Name"),
                             get_val("Off-Site Coordinating Shift Lead's Number"),
+                            get_val("Estimated Return"),
                             get_val('Is your rig configured to the off-site Wi-Fi?'),
                             get_val('Do you have appropriate clothing and shoes?'),
                             get_val('2 batteries (including in rig)- fully charged?'),
@@ -288,6 +290,14 @@ try:
                 with col2:
                     lead = st.text_input("Shift Lead's Name")
                     lead_num = st.text_input("Shift Lead's Number")
+                
+                st.write("---")
+                st.caption("Deployment Timing")
+                col_date, col_time = st.columns(2)
+                with col_date:
+                    est_return_date = st.date_input("Estimated Return Date", value=None)
+                with col_time:
+                    est_return_time = st.time_input("Estimated Return Time", value=None)
                     
                 st.write("---")
                 st.caption("Safety & Technical Checklist")
@@ -340,13 +350,23 @@ try:
                     missing_text = [k for k, v in required_text_fields.items() if not v.strip()]
                     missing_dropdowns = [k for k, v in required_dropdowns.items() if v == ""]
                     
+                    missing_datetime = []
+                    if est_return_date is None:
+                        missing_datetime.append("Estimated Return Date")
+                    if est_return_time is None:
+                        missing_datetime.append("Estimated Return Time")
+                    
                     if not selected_rig:
                         st.error("Submission Failed: Please select a rig to deploy.")
                     elif missing_text:
                         st.error(f"Submission Failed: The following text fields are required: {', '.join(missing_text)}")
+                    elif missing_datetime:
+                        st.error(f"Submission Failed: The following timing fields are required: {', '.join(missing_datetime)}")
                     elif missing_dropdowns:
                         st.error(f"Submission Failed: Please select an option for the following checklist questions: {', '.join(missing_dropdowns)}")
                     else:
+                        formatted_return = f"{est_return_date.strftime('%Y-%m-%d')} at {est_return_time.strftime('%I:%M %p')}"
+                        
                         payload = {
                             "status": "Deployed",
                             "assigned_to": assignee,
@@ -354,6 +374,7 @@ try:
                             "address": addr,
                             "shift_lead": lead,
                             "lead_number": lead_num,
+                            "estimated_return": formatted_return,
                             "damage_notes": damage,
                             "wifi_configured": wifi,
                             "clothing_shoes": gear,
@@ -368,7 +389,7 @@ try:
                         }
                         
                         log_details = (
-                            f"Location: {loc} | Address: {addr} | Lead: {lead} ({lead_num})\n"
+                            f"Location: {loc} | Address: {addr} | Lead: {lead} ({lead_num}) | Return: {formatted_return}\n"
                             f"Checklist Answers: Wi-Fi ({wifi}), Gear ({gear}), Batteries ({batt}), Hotspot ({hotspot}), "
                             f"Test Rec ({test_rec}), ServSafe ({servsafe}), Harassment Trng ({harass}), Violence Trng ({violence}), "
                             f"Home Wi-Fi ({home_wifi}), Overnight Chg ({overnight}), Damage ({damage})"
@@ -376,7 +397,7 @@ try:
                         
                         update_rig_state(selected_rig, payload)
                         log_action(selected_rig, "Deployed", assignee, log_details)
-                        st.success(f"{selected_rig} deployed to {assignee}.")
+                        st.success(f"{selected_rig} deployed to {assignee} (Expected Return: {formatted_return}).")
                         safe_rerun()
         else:
             st.info("No rigs currently available in the system. Use the Admin controls to add hardware or import your CSV list.")
@@ -436,11 +457,13 @@ try:
                     safe_rerun()
             else:
                 display_df = fleet_data.rename(columns=COLUMNS)
+                # Adding the Estimated Return to the standard user's dashboard view
                 visible_columns = [
                     "Rig Name", 
                     "Status", 
                     "Assigned To", 
                     "Location",
+                    "Estimated Return",
                     "Last Updated"
                 ]
                 display_df = display_df[visible_columns]
@@ -465,6 +488,7 @@ try:
                         "address": "",
                         "shift_lead": "",
                         "lead_number": "",
+                        "estimated_return": "",
                         "damage_notes": return_notes,
                         "wifi_configured": "",
                         "clothing_shoes": "",
