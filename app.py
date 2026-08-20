@@ -117,7 +117,7 @@ try:
                 sel_rig = st.selectbox("Select Rig", [""] + avail)
                 
                 c1, c2 = st.columns(2)
-                t_flds = [("assigned_to", "Assignee Name", c1), ("location", "Off-Site Location Name", c1), ("address", "Off-Site Location Address", c1), ("shift_lead", "Shift Lead's Name", c2), ("lead_number", "Shift Lead's Number", c2)]
+                t_flds = [("assigned_to", "Assignee Name", c1), ("location", "Off-Site Location Name", c1), ("address", "Off-Site Location Address", c1), ("shift_lead", "Shift Lead's Name", c2), ("lead_number", "Shift Lead's Phone Number", c2)]
                 req_t = {k: (lbl, col.text_input(lbl)) for k, lbl, col in t_flds}
                     
                 st.write("---"); st.caption("Safety & Technical Checklist (Required)")
