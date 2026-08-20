@@ -55,11 +55,12 @@ try:
 
     st.title("Rig Checkout List")
 
-    # --- ADMIN ---
+   # --- ADMIN ---
     st.sidebar.header("System Access")
-    is_admin = (st.sidebar.text_input("Admin Key", type="password") == "Hellfire")
+    admin_pass = st.secrets.get("ADMIN_PASSWORD", "")
+    is_admin = bool(admin_pass) and (st.sidebar.text_input("Admin Key", type="password") == admin_pass)
     st.session_state.sidebar_state = "expanded" if is_admin else "collapsed"
-
+    
     if is_admin:
         st.sidebar.divider()
         st.sidebar.subheader("Admin Controls")
