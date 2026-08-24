@@ -17,7 +17,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# Required schema for history and CSV import/export
+# Standardized columns expected by the system
 REQUIRED_COLUMNS = [
     "Inspector Name", 
     "Rig ID", 
@@ -26,6 +26,21 @@ REQUIRED_COLUMNS = [
     "Hours / Mileage", 
     "Notes / Remarks"
 ]
+
+# Case-insensitive mapping for external audit logs (e.g., audit_log.csv)
+COLUMN_MAPPING = {
+    "timestamp": "Checkout Date",
+    "date": "Checkout Date",
+    "rig name": "Rig ID",
+    "rig": "Rig ID",
+    "assigned to": "Inspector Name",
+    "operator": "Inspector Name",
+    "user": "Inspector Name",
+    "action": "Rig Status",
+    "status": "Rig Status",
+    "notes": "Notes / Remarks",
+    "remarks": "Notes / Remarks"
+}
 
 # --- Initialize Session State ---
 if "form_key" not in st.session_state:
@@ -65,7 +80,7 @@ with tab_checkout:
 
     col_status, col_hours = st.columns(2)
     with col_status:
-        status_options = ["Pass / Ready for Service", "Needs Minor Maintenance", "Out of Service / Grounded"]
+        status_options = ["Pass / Ready for Service", "Needs Minor Maintenance", "Out of Service / Grounded", "Deployed", "Returned"]
         rig_status = st.selectbox("Rig Status", status_options, key=f"status_{fk}")
     with col_hours:
         hours_mileage = st.number_input("Current Hours / Mileage", min_value=0, step=1, key=f"hours_{fk}")
@@ -73,13 +88,11 @@ with tab_checkout:
     notes = st.text_area("Inspection Notes / Fluid Levels / Issues", placeholder="Detail any issues, fluid top-offs, or observations...", key=f"notes_{fk}")
 
     if st.button("Submit Checkout Inspection", type="primary", use_container_width=True):
-        # Validation
         if not inspector_name.strip():
             st.error("Please enter the Inspector / Operator Name.")
         elif not rig_id.strip():
             st.error("Please enter the Rig / Equipment ID.")
         else:
-            # Create new row
             new_entry = pd.DataFrame([{
                 "Inspector Name": inspector_name.strip(),
                 "Rig ID": rig_id.strip().upper(),
@@ -89,10 +102,8 @@ with tab_checkout:
                 "Notes / Remarks": notes.strip()
             }])
             
-            # Append to session history
             st.session_state.history = pd.concat([st.session_state.history, new_entry], ignore_index=True)
             
-            # Record submission & reset form
             st.session_state.last_submission = {
                 "name": inspector_name.strip(),
                 "rig": rig_id.strip().upper()
@@ -103,7 +114,7 @@ with tab_checkout:
 # ================= TAB 2: HISTORY & CSV IMPORT =================
 with tab_history:
     st.subheader("📥 Import Checkout History from CSV")
-    st.caption("Upload an existing CSV file to append past checkout logs to the active history.")
+    st.caption("Upload an existing CSV file (such as audit_log.csv) to append past records.")
     
     uploaded_file = st.file_uploader("Upload CSV File", type=["csv"])
     
@@ -111,20 +122,33 @@ with tab_history:
         try:
             imported_df = pd.read_csv(uploaded_file)
             
-            # Column header check
-            missing_cols = [col for col in REQUIRED_COLUMNS if col not in imported_df.columns]
+            # Map headers dynamically (e.g. 'Timestamp' -> 'Checkout Date', 'Rig Name' -> 'Rig ID')
+            rename_dict = {}
+            for col in imported_df.columns:
+                cleaned_col = str(col).strip().lower()
+                if cleaned_col in COLUMN_MAPPING:
+                    rename_dict[col] = COLUMN_MAPPING[cleaned_col]
             
-            if missing_cols:
-                st.error(f"Missing required CSV columns: `{', '.join(missing_cols)}`")
-                st.info(f"Required header layout:\n`{', '.join(REQUIRED_COLUMNS)}`")
-            else:
-                if st.button("📥 Append CSV to History Log", type="primary"):
-                    st.session_state.history = pd.concat(
-                        [st.session_state.history, imported_df[REQUIRED_COLUMNS]], 
-                        ignore_index=True
-                    ).fillna("")
-                    st.success(f"Successfully imported {len(imported_df)} checkout record(s)!")
-                    st.rerun()
+            df_mapped = imported_df.rename(columns=rename_dict)
+            
+            # Fill missing columns (such as Hours / Mileage if absent) with N/A
+            for col in REQUIRED_COLUMNS:
+                if col not in df_mapped.columns:
+                    df_mapped[col] = "N/A"
+            
+            df_final = df_mapped[REQUIRED_COLUMNS].fillna("N/A")
+            
+            st.markdown("**Preview of Auto-Mapped Import Data:**")
+            st.dataframe(df_final.head(), use_container_width=True)
+            
+            if st.button("📥 Append CSV to History Log", type="primary"):
+                st.session_state.history = pd.concat(
+                    [st.session_state.history, df_final], 
+                    ignore_index=True
+                ).fillna("N/A")
+                st.success(f"Successfully imported {len(df_final)} record(s) from CSV!")
+                st.rerun()
+                
         except Exception as e:
             st.error(f"Error parsing CSV file: {e}")
 
@@ -132,7 +156,6 @@ with tab_history:
     st.subheader("📜 Active Rig Checkout Log")
     
     if not st.session_state.history.empty:
-        # Display data table
         st.dataframe(st.session_state.history, use_container_width=True)
         
         col_dl, col_clr = st.columns([2, 1])
