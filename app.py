@@ -6,7 +6,7 @@ if "sidebar_state" not in st.session_state: st.session_state.sidebar_state = "co
 st.set_page_config(page_title="Rig Checkout System", layout="wide", initial_sidebar_state=st.session_state.sidebar_state)
 DB_NAME = "inventory.db"
 
-# Fixed Rerun Helper: Prevents catching Streamlit's internal control-flow exception
+# Rerun Helper
 def safe_rerun():
     if hasattr(st, "rerun"):
         st.rerun()
@@ -57,6 +57,11 @@ try:
 
     st.title("Rig Checkout List")
 
+    # Display persistent confirmation messages across reruns
+    if "flash_message" in st.session_state:
+        st.success(st.session_state.flash_message)
+        del st.session_state["flash_message"]
+
    # --- ADMIN ---
     st.sidebar.header("System Access")
     admin_pass = st.secrets.get("ADMIN_PASSWORD", "")
@@ -72,7 +77,8 @@ try:
                 try:
                     db_op("INSERT INTO fleet (rig_name, status) VALUES (?, 'Available')", (new_rig,))
                     log_action(new_rig, "Rig Added to Database")
-                    st.sidebar.success(f"Added {new_rig}"); safe_rerun()
+                    st.session_state.flash_message = f"Added {new_rig} to inventory."
+                    safe_rerun()
                 except: st.sidebar.error("Rig already exists.")
         
         with st.sidebar.expander("Delete Rig"):
@@ -81,7 +87,8 @@ try:
                 if st.button("Delete Rig"):
                     db_op("DELETE FROM fleet WHERE rig_name=?", (del_rig,))
                     log_action(del_rig, "Rig Deleted from Database")
-                    st.sidebar.success(f"Deleted {del_rig}"); safe_rerun()
+                    st.session_state.flash_message = f"Deleted {del_rig} from inventory."
+                    safe_rerun()
             else: st.sidebar.info("No rigs in database.")
         
         with st.sidebar.expander("Bulk Import CSV"):
@@ -102,7 +109,8 @@ try:
                     added += 1
                 
                 log_action("Bulk Import", f"CSV processed, {added} rigs imported")
-                st.sidebar.success(f"Successfully imported {added} rigs."); safe_rerun()
+                st.session_state.flash_message = f"Successfully imported {added} rigs."
+                safe_rerun()
 
         with st.sidebar.expander("Export CSV"):
             if not (fleet_df := fetch_fleet()).empty:
@@ -152,7 +160,9 @@ try:
                         
                         update_rig(sel_rig, payload)
                         log_action(sel_rig, "Deployed", payload["assigned_to"], log_msg)
-                        st.toast(f"✅ {sel_rig} deployed to {payload['assigned_to']}.")
+                        
+                        # Set confirmation message for post-rerun display
+                        st.session_state.flash_message = f"🎉 **{sel_rig}** was successfully deployed to **{payload['assigned_to']}**!" + (f" (Expected Return: {fmt_ret})" if fmt_ret else "")
                         safe_rerun()
         else: st.info("No rigs currently available in the system. Use the Admin controls to add hardware or import your CSV list.")
 
@@ -169,7 +179,7 @@ try:
                         if not r.equals(df.iloc[i]):
                             update_rig(r['rig_name'], r.drop(["rig_name", "last_updated"]).to_dict())
                             log_action(r['rig_name'], f"Admin Table Edit -> Status: {r['status']}", r['assigned_to'])
-                    st.toast("✅ Database updated successfully!")
+                    st.session_state.flash_message = "Database updated successfully!"
                     safe_rerun()
             else: st.dataframe(disp[["Rig Name", "Status", "Assigned To", "Location", "Estimated Return", "Last Updated"]], use_container_width=True, hide_index=True)
 
@@ -182,7 +192,7 @@ try:
                 if st.form_submit_button("Return Rig"):
                     update_rig(ret_rig, {**{k: "" for k in COLUMNS if k not in ["rig_name", "last_updated"]}, "status": "Available", "damage_notes": notes})
                     log_action(ret_rig, "Returned", "", notes)
-                    st.toast(f"✅ {ret_rig} has been returned and is now Available.")
+                    st.session_state.flash_message = f"✅ **{ret_rig}** has been returned and is now Available."
                     safe_rerun()
         else: st.info("No rigs are currently marked as deployed.")
 
@@ -200,7 +210,7 @@ try:
                     else:
                         update_rig(srv_rig, {"status": new_stat, "damage_notes": notes.strip()})
                         log_action(srv_rig, f"Status updated to {new_stat}", "", notes.strip())
-                        st.toast(f"✅ {srv_rig} status successfully updated to {new_stat}.")
+                        st.session_state.flash_message = f"✅ **{srv_rig}** status successfully updated to **{new_stat}**."
                         safe_rerun()
         else: st.info("No available rigs to report.")
 
@@ -258,7 +268,7 @@ try:
                                 db_op("INSERT OR IGNORE INTO fleet (rig_name, status) VALUES (?, 'Available')", (rig_name,))
                                 update_rig(rig_name, {"status": status_val, "assigned_to": assigned, "last_updated": t_stamp})
                                 
-                        st.toast(f"✅ Imported {records_added} records and synced {len(unique_rigs)} rigs!")
+                        st.session_state.flash_message = f"Successfully imported {records_added} records and synced {len(unique_rigs)} rigs!"
                         safe_rerun()
                     except Exception as e:
                         st.error(f"Error reading CSV file: {e}")
@@ -271,7 +281,7 @@ try:
                 c1.download_button("Download Log CSV", log_df.to_csv(index=False).encode('utf-8'), "audit_log.csv", "text/csv")
                 if c2.button("Clear History Log", type="primary"): 
                     db_op("DELETE FROM audit_log")
-                    st.toast("✅ History log cleared!")
+                    st.session_state.flash_message = "History log cleared!"
                     safe_rerun()
 
 except Exception: st.error("An error occurred while running the app:"); st.code(traceback.format_exc())
