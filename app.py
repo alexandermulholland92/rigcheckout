@@ -50,7 +50,9 @@ try:
         return df
 
     def update_rig(rig, data):
-        data["last_updated"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        # Allow inheriting custom timestamps (for CSV imports) otherwise use current time
+        if "last_updated" not in data:
+            data["last_updated"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         db_op(f"UPDATE fleet SET {', '.join([f'\"{k}\"=?' for k in data])} WHERE rig_name=?", list(data.values()) + [rig])
 
     st.title("Rig Checkout List")
@@ -202,14 +204,13 @@ try:
         with tabs[4]:
             st.subheader("Exchange History Log")
             
-            # --- NEW: Import Audit Log CSV feature ---
-            with st.expander("📥 Import History Log (audit_log.csv)"):
+            # --- UPDATED: Import Audit Log CSV feature with Dashboard Sync ---
+            with st.expander("📥 Import History Log & Update Dashboard (audit_log.csv)"):
                 uploaded_audit = st.file_uploader("Upload your audit_log.csv file", type=["csv"])
-                if uploaded_audit is not None and st.button("Import Audit Log"):
+                if uploaded_audit is not None and st.button("Process & Sync"):
                     try:
                         audit_df = pd.read_csv(uploaded_audit)
                         
-                        # Intelligently map headers case-insensitively
                         col_map = {
                             "timestamp": "timestamp", "date": "timestamp",
                             "rig name": "rig_name", "rig": "rig_name", "rig id": "rig_name",
@@ -220,7 +221,6 @@ try:
                         audit_df.columns = [str(c).strip().lower() for c in audit_df.columns]
                         audit_df = audit_df.rename(columns=col_map)
                         
-                        # Add any missing valid columns
                         valid_cols = ["timestamp", "rig_name", "action", "assigned_to", "notes"]
                         for col in valid_cols:
                             if col not in audit_df.columns:
@@ -228,18 +228,42 @@ try:
                                 
                         audit_df = audit_df[valid_cols].fillna("")
                         
-                        # Insert records into SQLite history log
+                        # Sort chronologically so the dashboard reflects the exact final status of each rig
+                        audit_df = audit_df.sort_values(by="timestamp", ascending=True)
+                        
                         records_added = 0
+                        unique_rigs = set()
+                        
                         for _, row in audit_df.iterrows():
-                            db_op("INSERT INTO audit_log (timestamp, rig_name, action, assigned_to, notes) VALUES (?, ?, ?, ?, ?)",
-                                  (str(row["timestamp"]), str(row["rig_name"]), str(row["action"]), str(row["assigned_to"]), str(row["notes"])))
-                            records_added += 1
+                            rig_name = str(row["rig_name"]).strip()
+                            if not rig_name: continue
                             
-                        st.success(f"Successfully imported {records_added} records into the history log!")
+                            t_stamp = str(row["timestamp"])
+                            act = str(row["action"])
+                            assigned = str(row["assigned_to"])
+                            nts = str(row["notes"])
+                            
+                            # 1. Log to history database
+                            db_op("INSERT INTO audit_log (timestamp, rig_name, action, assigned_to, notes) VALUES (?, ?, ?, ?, ?)",
+                                  (t_stamp, rig_name, act, assigned, nts))
+                            records_added += 1
+                            unique_rigs.add(rig_name)
+                            
+                            # 2. Sync to Dashboard Database
+                            status_val = None
+                            if "Deployed" in act: status_val = "Deployed"
+                            elif any(x in act for x in ["Returned", "Available", "Added"]): status_val = "Available"; assigned = ""
+                            elif any(x in act for x in ["Needs Servicing", "Maintenance"]): status_val = "Needs Servicing"
+                            
+                            if status_val:
+                                db_op("INSERT OR IGNORE INTO fleet (rig_name, status) VALUES (?, 'Available')", (rig_name,))
+                                update_rig(rig_name, {"status": status_val, "assigned_to": assigned, "last_updated": t_stamp})
+                                
+                        st.success(f"Successfully imported {records_added} records and synced {len(unique_rigs)} rigs to your Dashboard!")
                         safe_rerun()
                     except Exception as e:
                         st.error(f"Error reading CSV file: {e}")
-            # -----------------------------------------
+            # ----------------------------------------------------------------
 
             if (log_df := db_op('SELECT timestamp as Timestamp, rig_name as "Rig Name", action as Action, assigned_to as "Assigned To", notes as Notes FROM audit_log ORDER BY id DESC', fetch="df")).empty: 
                 st.info("No actions have been logged yet.")
