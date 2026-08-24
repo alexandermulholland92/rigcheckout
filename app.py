@@ -8,12 +8,12 @@ import streamlit as st
 st.set_page_config(
     page_title="Rig Checkout System", 
     page_icon="🚜", 
-    layout="centered"
+    layout="wide"
 )
 
 st.markdown("""
     <style>
-    .block-container { padding-top: 2rem; padding-bottom: 3rem; max-width: 760px; }
+    .block-container { padding-top: 2rem; padding-bottom: 3rem; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -27,7 +27,7 @@ REQUIRED_COLUMNS = [
     "Notes / Remarks"
 ]
 
-# Case-insensitive mapping for external audit logs (e.g., audit_log.csv)
+# Mapping for external audit logs
 COLUMN_MAPPING = {
     "timestamp": "Checkout Date",
     "date": "Checkout Date",
@@ -53,17 +53,71 @@ if "history" not in st.session_state:
 fk = st.session_state.form_key
 
 # --- Header ---
-st.title("🚜 Rig Checkout System")
-st.caption("Perform equipment checkouts, view real-time fleet metrics, and import history.")
+st.title("🚜 Rig & Device Checkout System")
+st.caption("Manage equipment checkouts, track live device statuses, and import audit logs.")
 
 # --- Tab Navigation ---
-tab_checkout, tab_dashboard, tab_history = st.tabs([
+tab_dashboard, tab_checkout, tab_history = st.tabs([
+    "📊 Device Dashboard", 
     "📋 Rig Checkout Form", 
-    "📊 Dashboard", 
-    "📜 History & CSV Import"
+    "📜 Audit History & CSV Import"
 ])
 
-# ================= TAB 1: CHECKOUT FORM =================
+# ================= TAB 1: DEVICE DASHBOARD =================
+with tab_dashboard:
+    st.subheader("🖥️ Device Inventory & Live Fleet Status")
+    df = st.session_state.history
+    
+    if df.empty:
+        st.info("No devices registered yet. Submit a checkout form or import `audit_log.csv` in the History tab to view device statuses.")
+    else:
+        # Group history to find the latest record for each unique Rig ID
+        df_sorted = df.sort_values(by="Checkout Date", ascending=False)
+        device_status_df = df_sorted.groupby("Rig ID", as_index=False).first()
+        
+        # Summary Metrics
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Total Tracked Devices", len(device_status_df))
+        
+        deployed_count = device_status_df[device_status_df["Rig Status"].str.contains("Deployed|Pass", case=False, na=False)].shape[0]
+        servicing_count = device_status_df[device_status_df["Rig Status"].str.contains("Maintenance|Service|Grounded", case=False, na=False)].shape[0]
+        returned_count = device_status_df[device_status_df["Rig Status"].str.contains("Returned|Available", case=False, na=False)].shape[0]
+        
+        m2.metric("🟢 Active / Deployed", deployed_count)
+        m3.metric("🔴 Needs Servicing", servicing_count)
+        m4.metric("⚪ Returned / Available", returned_count)
+        
+        st.markdown("---")
+        
+        # Search & Filter Controls
+        col_search, col_filter = st.columns([2, 1])
+        with col_search:
+            search_query = st.text_input("🔍 Search Device / Rig Name", placeholder="e.g., Portland, Cassavetes...").strip()
+        with col_filter:
+            status_filter = st.selectbox("Filter by Status", ["All"] + list(device_status_df["Rig Status"].unique()))
+            
+        filtered_devices = device_status_df.copy()
+        if search_query:
+            filtered_devices = filtered_devices[filtered_devices["Rig ID"].str.contains(search_query, case=False, na=False)]
+        if status_filter != "All":
+            filtered_devices = filtered_devices[filtered_devices["Rig Status"] == status_filter]
+            
+        # Device Inventory Table
+        st.markdown("### All Devices Status Board")
+        st.dataframe(
+            filtered_devices[["Rig ID", "Rig Status", "Inspector Name", "Checkout Date", "Notes / Remarks"]],
+            column_config={
+                "Rig ID": st.column_config.TextColumn("Device / Rig Name"),
+                "Rig Status": st.column_config.TextColumn("Current Status"),
+                "Inspector Name": st.column_config.TextColumn("Assigned To / Inspector"),
+                "Checkout Date": st.column_config.TextColumn("Last Activity Timestamp"),
+                "Notes / Remarks": st.column_config.TextColumn("Latest Notes")
+            },
+            use_container_width=True,
+            hide_index=True
+        )
+
+# ================= TAB 2: CHECKOUT FORM =================
 with tab_checkout:
     if st.session_state.last_submission:
         st.success(f"🎉 **Checkout Logged Successfully!**\n\nRig **{st.session_state.last_submission['rig']}** logged by **{st.session_state.last_submission['name']}**.")
@@ -78,18 +132,18 @@ with tab_checkout:
     
     col_rig, col_date = st.columns(2)
     with col_rig:
-        rig_id = st.text_input("Rig / Equipment ID", placeholder="e.g. RIG-104", key=f"rig_{fk}")
+        rig_id = st.text_input("Rig / Equipment ID", placeholder="e.g. Portland, RIG-104", key=f"rig_{fk}")
     with col_date:
         checkout_date = st.date_input("Checkout Date", value=date.today(), key=f"date_{fk}")
 
     col_status, col_hours = st.columns(2)
     with col_status:
-        status_options = ["Pass / Ready for Service", "Needs Minor Maintenance", "Out of Service / Grounded", "Deployed", "Returned"]
+        status_options = ["Deployed", "Returned", "Pass / Ready for Service", "Needs Minor Maintenance", "Out of Service / Grounded"]
         rig_status = st.selectbox("Rig Status", status_options, key=f"status_{fk}")
     with col_hours:
         hours_mileage = st.number_input("Current Hours / Mileage", min_value=0, step=1, key=f"hours_{fk}")
 
-    notes = st.text_area("Inspection Notes / Fluid Levels / Issues", placeholder="Detail any issues, fluid top-offs, or observations...", key=f"notes_{fk}")
+    notes = st.text_area("Inspection Notes / Location / Issues", placeholder="Detail any location info, fluid top-offs, or observations...", key=f"notes_{fk}")
 
     if st.button("Submit Checkout Inspection", type="primary", use_container_width=True):
         if not inspector_name.strip():
@@ -99,7 +153,7 @@ with tab_checkout:
         else:
             new_entry = pd.DataFrame([{
                 "Inspector Name": inspector_name.strip(),
-                "Rig ID": rig_id.strip().upper(),
+                "Rig ID": rig_id.strip(),
                 "Checkout Date": str(checkout_date),
                 "Rig Status": rig_status,
                 "Hours / Mileage": hours_mileage,
@@ -110,49 +164,15 @@ with tab_checkout:
             
             st.session_state.last_submission = {
                 "name": inspector_name.strip(),
-                "rig": rig_id.strip().upper()
+                "rig": rig_id.strip()
             }
             st.session_state.form_key += 1
             st.rerun()
 
-# ================= TAB 2: DASHBOARD =================
-with tab_dashboard:
-    st.subheader("Fleet & Checkout Dashboard")
-    df = st.session_state.history
-    
-    if df.empty:
-        st.info("No data available yet. Submit a checkout form or import a CSV in the History tab to populate dashboard analytics.")
-    else:
-        # Key Fleet Metrics
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Total Logs", len(df))
-        m2.metric("Active Rigs", df["Rig ID"].nunique())
-        
-        deployed_cnt = df[df["Rig Status"].str.contains("Deployed|Pass", case=False, na=False)].shape[0]
-        attention_cnt = df[df["Rig Status"].str.contains("Maintenance|Grounded|Out of Service", case=False, na=False)].shape[0]
-        
-        m3.metric("Deployed / Ready", deployed_cnt)
-        m4.metric("Needs Attention", attention_cnt)
-        
-        st.markdown("---")
-        
-        # Visualizations
-        c1, c2 = st.columns(2)
-        with c1:
-            st.markdown("**Checkouts per Rig**")
-            st.bar_chart(df["Rig ID"].value_counts())
-        with c2:
-            st.markdown("**Status Distribution**")
-            st.bar_chart(df["Rig Status"].value_counts())
-            
-        st.markdown("---")
-        st.markdown("**Latest Activity Log**")
-        st.dataframe(df.tail(5), use_container_width=True)
-
 # ================= TAB 3: HISTORY & CSV IMPORT =================
 with tab_history:
     st.subheader("📥 Import Checkout History from CSV")
-    st.caption("Upload an existing CSV file (such as audit_log.csv) to append past records.")
+    st.caption("Upload `audit_log.csv` or any checkout log to populate the device dashboard.")
     
     uploaded_file = st.file_uploader("Upload CSV File", type=["csv"])
     
@@ -175,22 +195,22 @@ with tab_history:
             
             df_final = df_mapped[REQUIRED_COLUMNS].fillna("N/A")
             
-            st.markdown("**Preview of Auto-Mapped Import Data:**")
+            st.markdown("**Preview of Import Data:**")
             st.dataframe(df_final.head(), use_container_width=True)
             
-            if st.button("📥 Append CSV to History Log", type="primary"):
+            if st.button("📥 Import & Populate Dashboard", type="primary"):
                 st.session_state.history = pd.concat(
                     [st.session_state.history, df_final], 
                     ignore_index=True
                 ).fillna("N/A")
-                st.success(f"Successfully imported {len(df_final)} record(s) from CSV!")
+                st.success(f"Successfully imported {len(df_final)} record(s)!")
                 st.rerun()
                 
         except Exception as e:
             st.error(f"Error parsing CSV file: {e}")
 
     st.markdown("---")
-    st.subheader("📜 Active Rig Checkout Log")
+    st.subheader("📜 Complete Activity Log")
     
     if not st.session_state.history.empty:
         st.dataframe(st.session_state.history, use_container_width=True)
@@ -200,7 +220,7 @@ with tab_history:
             csv_buffer = io.StringIO()
             st.session_state.history.to_csv(csv_buffer, index=False)
             st.download_button(
-                label="💾 Download History as CSV",
+                label="💾 Download Log as CSV",
                 data=csv_buffer.getvalue(),
                 file_name="rig_checkout_history.csv",
                 mime="text/csv",
@@ -211,4 +231,4 @@ with tab_history:
                 st.session_state.history = pd.DataFrame(columns=REQUIRED_COLUMNS)
                 st.rerun()
     else:
-        st.info("No checkout logs recorded yet. Submit a form above or import a CSV file.")
+        st.info("No activity logs recorded yet. Upload a CSV above or submit a checkout form.")
