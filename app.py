@@ -6,11 +6,12 @@ if "sidebar_state" not in st.session_state: st.session_state.sidebar_state = "co
 st.set_page_config(page_title="Rig Checkout System", layout="wide", initial_sidebar_state=st.session_state.sidebar_state)
 DB_NAME = "inventory.db"
 
+# Fixed Rerun Helper: Prevents catching Streamlit's internal control-flow exception
 def safe_rerun():
-    try: st.rerun()
-    except:
-        try: st.experimental_rerun()
-        except: st.stop()
+    if hasattr(st, "rerun"):
+        st.rerun()
+    elif hasattr(st, "experimental_rerun"):
+        st.experimental_rerun()
 
 COLUMNS = {
     "rig_name": "Rig Name", "status": "Status", "assigned_to": "Assigned To", "location": "Location",
@@ -50,7 +51,6 @@ try:
         return df
 
     def update_rig(rig, data):
-        # Allow inheriting custom timestamps (for CSV imports) otherwise use current time
         if "last_updated" not in data:
             data["last_updated"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         db_op(f"UPDATE fleet SET {', '.join([f'\"{k}\"=?' for k in data])} WHERE rig_name=?", list(data.values()) + [rig])
@@ -115,7 +115,7 @@ try:
     with tabs[0]:
         st.subheader("Deploy Hardware")
         if avail := [r[0] for r in db_op("SELECT rig_name FROM fleet WHERE status='Available' ORDER BY rig_name", fetch="all")]:
-            with st.form("checkout_form"):
+            with st.form("checkout_form", clear_on_submit=True):
                 st.caption("Please fill out all required text fields and checklist items to deploy a rig.")
                 sel_rig = st.selectbox("Select Rig", [""] + avail)
                 
@@ -152,7 +152,8 @@ try:
                         
                         update_rig(sel_rig, payload)
                         log_action(sel_rig, "Deployed", payload["assigned_to"], log_msg)
-                        st.success(f"{sel_rig} deployed to {payload['assigned_to']}." + (f" (Expected Return: {fmt_ret})" if fmt_ret else "")); safe_rerun()
+                        st.toast(f"✅ {sel_rig} deployed to {payload['assigned_to']}.")
+                        safe_rerun()
         else: st.info("No rigs currently available in the system. Use the Admin controls to add hardware or import your CSV list.")
 
     with tabs[1]:
@@ -168,26 +169,28 @@ try:
                         if not r.equals(df.iloc[i]):
                             update_rig(r['rig_name'], r.drop(["rig_name", "last_updated"]).to_dict())
                             log_action(r['rig_name'], f"Admin Table Edit -> Status: {r['status']}", r['assigned_to'])
-                    st.success("Database updated successfully!"); safe_rerun()
+                    st.toast("✅ Database updated successfully!")
+                    safe_rerun()
             else: st.dataframe(disp[["Rig Name", "Status", "Assigned To", "Location", "Estimated Return", "Last Updated"]], use_container_width=True, hide_index=True)
 
     with tabs[2]:
         st.subheader("Return Hardware")
         if deployed := [r[0] for r in db_op("SELECT rig_name FROM fleet WHERE status='Deployed' ORDER BY rig_name", fetch="all")]:
-            with st.form("return_form"):
+            with st.form("return_form", clear_on_submit=True):
                 ret_rig = st.selectbox("Select Rig to Return", deployed)
                 notes = st.text_area("Return Notes / Damage Report (Optional)")
                 if st.form_submit_button("Return Rig"):
                     update_rig(ret_rig, {**{k: "" for k in COLUMNS if k not in ["rig_name", "last_updated"]}, "status": "Available", "damage_notes": notes})
                     log_action(ret_rig, "Returned", "", notes)
-                    st.success(f"{ret_rig} has been returned and is now Available."); safe_rerun()
+                    st.toast(f"✅ {ret_rig} has been returned and is now Available.")
+                    safe_rerun()
         else: st.info("No rigs are currently marked as deployed.")
 
     with tabs[3]:
         st.subheader("Mark Rig for Servicing")
         st.write("Use this section to flag an available rig that needs maintenance, or mark a serviced rig as available again.")
         if srv_rigs := [r[0] for r in db_op("SELECT rig_name FROM fleet WHERE status IN ('Available', 'Needs Servicing') ORDER BY rig_name", fetch="all")]:
-            with st.form("service_form"):
+            with st.form("service_form", clear_on_submit=True):
                 srv_rig = st.selectbox("Select Rig", [""] + srv_rigs)
                 new_stat = st.selectbox("Update Status", ["Needs Servicing", "Available"])
                 notes = st.text_area("Service / Damage Notes (Required)")
@@ -197,14 +200,14 @@ try:
                     else:
                         update_rig(srv_rig, {"status": new_stat, "damage_notes": notes.strip()})
                         log_action(srv_rig, f"Status updated to {new_stat}", "", notes.strip())
-                        st.success(f"{srv_rig} status successfully updated to {new_stat}."); safe_rerun()
+                        st.toast(f"✅ {srv_rig} status successfully updated to {new_stat}.")
+                        safe_rerun()
         else: st.info("No available rigs to report.")
 
     if is_admin:
         with tabs[4]:
             st.subheader("Exchange History Log")
             
-            # --- UPDATED: Import Audit Log CSV feature with Dashboard Sync ---
             with st.expander("📥 Import History Log & Update Dashboard (audit_log.csv)"):
                 uploaded_audit = st.file_uploader("Upload your audit_log.csv file", type=["csv"])
                 if uploaded_audit is not None and st.button("Process & Sync"):
@@ -227,8 +230,6 @@ try:
                                 audit_df[col] = ""
                                 
                         audit_df = audit_df[valid_cols].fillna("")
-                        
-                        # Sort chronologically so the dashboard reflects the exact final status of each rig
                         audit_df = audit_df.sort_values(by="timestamp", ascending=True)
                         
                         records_added = 0
@@ -243,13 +244,11 @@ try:
                             assigned = str(row["assigned_to"])
                             nts = str(row["notes"])
                             
-                            # 1. Log to history database
                             db_op("INSERT INTO audit_log (timestamp, rig_name, action, assigned_to, notes) VALUES (?, ?, ?, ?, ?)",
                                   (t_stamp, rig_name, act, assigned, nts))
                             records_added += 1
                             unique_rigs.add(rig_name)
                             
-                            # 2. Sync to Dashboard Database
                             status_val = None
                             if "Deployed" in act: status_val = "Deployed"
                             elif any(x in act for x in ["Returned", "Available", "Added"]): status_val = "Available"; assigned = ""
@@ -259,11 +258,10 @@ try:
                                 db_op("INSERT OR IGNORE INTO fleet (rig_name, status) VALUES (?, 'Available')", (rig_name,))
                                 update_rig(rig_name, {"status": status_val, "assigned_to": assigned, "last_updated": t_stamp})
                                 
-                        st.success(f"Successfully imported {records_added} records and synced {len(unique_rigs)} rigs to your Dashboard!")
+                        st.toast(f"✅ Imported {records_added} records and synced {len(unique_rigs)} rigs!")
                         safe_rerun()
                     except Exception as e:
                         st.error(f"Error reading CSV file: {e}")
-            # ----------------------------------------------------------------
 
             if (log_df := db_op('SELECT timestamp as Timestamp, rig_name as "Rig Name", action as Action, assigned_to as "Assigned To", notes as Notes FROM audit_log ORDER BY id DESC', fetch="df")).empty: 
                 st.info("No actions have been logged yet.")
@@ -271,6 +269,9 @@ try:
                 st.dataframe(log_df, use_container_width=True, hide_index=True)
                 c1, c2 = st.columns([2, 1])
                 c1.download_button("Download Log CSV", log_df.to_csv(index=False).encode('utf-8'), "audit_log.csv", "text/csv")
-                if c2.button("Clear History Log", type="primary"): db_op("DELETE FROM audit_log"); st.success("History log cleared!"); safe_rerun()
+                if c2.button("Clear History Log", type="primary"): 
+                    db_op("DELETE FROM audit_log")
+                    st.toast("✅ History log cleared!")
+                    safe_rerun()
 
 except Exception: st.error("An error occurred while running the app:"); st.code(traceback.format_exc())
