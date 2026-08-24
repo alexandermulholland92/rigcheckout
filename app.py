@@ -13,7 +13,7 @@ st.set_page_config(
 
 st.markdown("""
     <style>
-    .block-container { padding-top: 2rem; padding-bottom: 3rem; max-width: 720px; }
+    .block-container { padding-top: 2rem; padding-bottom: 3rem; max-width: 760px; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -54,10 +54,14 @@ fk = st.session_state.form_key
 
 # --- Header ---
 st.title("🚜 Rig Checkout System")
-st.caption("Perform equipment checkouts, track inspection logs, and import history.")
+st.caption("Perform equipment checkouts, view real-time fleet metrics, and import history.")
 
 # --- Tab Navigation ---
-tab_checkout, tab_history = st.tabs(["📋 Rig Checkout Form", "📜 History & CSV Import"])
+tab_checkout, tab_dashboard, tab_history = st.tabs([
+    "📋 Rig Checkout Form", 
+    "📊 Dashboard", 
+    "📜 History & CSV Import"
+])
 
 # ================= TAB 1: CHECKOUT FORM =================
 with tab_checkout:
@@ -111,7 +115,41 @@ with tab_checkout:
             st.session_state.form_key += 1
             st.rerun()
 
-# ================= TAB 2: HISTORY & CSV IMPORT =================
+# ================= TAB 2: DASHBOARD =================
+with tab_dashboard:
+    st.subheader("Fleet & Checkout Dashboard")
+    df = st.session_state.history
+    
+    if df.empty:
+        st.info("No data available yet. Submit a checkout form or import a CSV in the History tab to populate dashboard analytics.")
+    else:
+        # Key Fleet Metrics
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Total Logs", len(df))
+        m2.metric("Active Rigs", df["Rig ID"].nunique())
+        
+        deployed_cnt = df[df["Rig Status"].str.contains("Deployed|Pass", case=False, na=False)].shape[0]
+        attention_cnt = df[df["Rig Status"].str.contains("Maintenance|Grounded|Out of Service", case=False, na=False)].shape[0]
+        
+        m3.metric("Deployed / Ready", deployed_cnt)
+        m4.metric("Needs Attention", attention_cnt)
+        
+        st.markdown("---")
+        
+        # Visualizations
+        c1, c2 = st.columns(2)
+        with c1:
+            st.markdown("**Checkouts per Rig**")
+            st.bar_chart(df["Rig ID"].value_counts())
+        with c2:
+            st.markdown("**Status Distribution**")
+            st.bar_chart(df["Rig Status"].value_counts())
+            
+        st.markdown("---")
+        st.markdown("**Latest Activity Log**")
+        st.dataframe(df.tail(5), use_container_width=True)
+
+# ================= TAB 3: HISTORY & CSV IMPORT =================
 with tab_history:
     st.subheader("📥 Import Checkout History from CSV")
     st.caption("Upload an existing CSV file (such as audit_log.csv) to append past records.")
@@ -122,7 +160,7 @@ with tab_history:
         try:
             imported_df = pd.read_csv(uploaded_file)
             
-            # Map headers dynamically (e.g. 'Timestamp' -> 'Checkout Date', 'Rig Name' -> 'Rig ID')
+            # Map headers dynamically
             rename_dict = {}
             for col in imported_df.columns:
                 cleaned_col = str(col).strip().lower()
@@ -131,7 +169,6 @@ with tab_history:
             
             df_mapped = imported_df.rename(columns=rename_dict)
             
-            # Fill missing columns (such as Hours / Mileage if absent) with N/A
             for col in REQUIRED_COLUMNS:
                 if col not in df_mapped.columns:
                     df_mapped[col] = "N/A"
