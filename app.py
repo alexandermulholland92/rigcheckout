@@ -1,13 +1,15 @@
-"""Rig Checkout System - Streamlit + SQLite tracker for off-site recording rigs."""
+"""Rig Checkout System - Streamlit + Postgres tracker for off-site recording rigs."""
 
-import sqlite3
 import traceback
+from contextlib import contextmanager
 from datetime import datetime
 
 import pandas as pd
+import psycopg2
+import psycopg2.extras
 import streamlit as st
+from psycopg2.pool import ThreadedConnectionPool
 
-DB_NAME = "inventory.db"
 YES_NO = ["", "Yes", "No"]
 TS_FMT = "%Y-%m-%d %H:%M:%S"
 
@@ -76,23 +78,116 @@ AUDIT_ALIASES = {
 }
 
 
-# --- helpers ---------------------------------------------------------------
+# --- database connection ---------------------------------------------------
+def db_url():
+    """Read the Neon connection string out of Streamlit secrets."""
+    try:
+        return st.secrets["connections"]["rigs"]["url"]
+    except Exception:
+        st.error(
+            "No database connection is configured.\n\n"
+            "Open this app on share.streamlit.io, go to Settings -> Secrets, "
+            "and add these two lines:\n\n"
+            '[connections.rigs]\n'
+            'url = "postgresql://...your Neon connection string..."'
+        )
+        st.stop()
+
+
+@st.cache_resource
+def pool():
+    """One shared pool of connections for the whole app, opened lazily."""
+    return ThreadedConnectionPool(1, 5, dsn=db_url(), connect_timeout=10)
+
+
+def reset_pool():
+    """Throw away the pool so the next call opens fresh connections."""
+    try:
+        pool().closeall()
+    except Exception:
+        pass
+    pool.clear()
+
+
+@contextmanager
+def borrow():
+    connections = pool()
+    conn = connections.getconn()
+    broken = False
+    try:
+        yield conn
+    except (psycopg2.OperationalError, psycopg2.InterfaceError):
+        broken = True
+        raise
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            broken = True
+        raise
+    finally:
+        try:
+            connections.putconn(conn, close=broken)
+        except Exception:
+            pass
+
+
+def run(work, retry=True):
+    """Run `work(cursor)` inside a transaction, retrying once on a dead socket.
+
+    Neon suspends the database after a few minutes of no traffic, which quietly
+    kills any connection we were holding. The retry re-opens and tries again so
+    the first person to touch the app after a quiet spell doesn't see an error.
+    """
+    try:
+        with borrow() as conn:
+            with conn.cursor() as cur:
+                result = work(cur)
+            conn.commit()
+            return result
+    except (psycopg2.OperationalError, psycopg2.InterfaceError):
+        if not retry:
+            raise
+        reset_pool()
+        return run(work, retry=False)
+
+
 def db_op(query, params=(), fetch=None):
-    with sqlite3.connect(DB_NAME, timeout=20) as conn:
-        if fetch == "df":
-            return pd.read_sql_query(query, conn, params=params)
-        cur = conn.cursor()
+    """Run one statement. fetch: None, 'all' for rows, or 'df' for a DataFrame."""
+    def work(cur):
         cur.execute(query, params)
-        conn.commit()
-        return cur.fetchall() if fetch == "all" else cur.lastrowid
+        if fetch == "df":
+            return pd.DataFrame(cur.fetchall(), columns=[d[0] for d in cur.description])
+        if fetch == "all":
+            return cur.fetchall()
+        return None
+    return run(work)
 
 
+def db_many(query, rows):
+    """Run the same statement over many rows in batches - much faster remotely."""
+    if not rows:
+        return
+    run(lambda cur: psycopg2.extras.execute_batch(cur, query, rows, page_size=100))
+
+
+# --- helpers ---------------------------------------------------------------
 def quoted(cols):
     return ", ".join(f'"{c}"' for c in cols)
 
 
 def now():
     return datetime.now().strftime(TS_FMT)
+
+
+def clean(value):
+    """Coerce a cell to a plain string. Postgres rejects numpy/NaN values."""
+    try:
+        if value is None or pd.isna(value):
+            return ""
+    except (TypeError, ValueError):
+        pass
+    return str(value)
 
 
 def safe_rerun():
@@ -108,41 +203,43 @@ def flash(message):
 
 
 def fleet_columns():
-    return [c[1] for c in db_op("PRAGMA table_info(fleet)", fetch="all")]
+    rows = db_op("SELECT column_name FROM information_schema.columns "
+                 "WHERE table_schema = current_schema() AND table_name = 'fleet'", fetch="all")
+    return [r[0] for r in rows]
 
 
+@st.cache_resource
 def init_db():
-    db_op("CREATE TABLE IF NOT EXISTS fleet (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+    """Create the tables if they don't exist. Cached so it runs once, not every click."""
+    db_op("CREATE TABLE IF NOT EXISTS fleet (id SERIAL PRIMARY KEY, "
           "rig_name TEXT UNIQUE, status TEXT DEFAULT 'Available')")
     existing = fleet_columns()
     for col in (c for c in COLUMNS if c not in existing):
-        try:
-            db_op(f'ALTER TABLE fleet ADD COLUMN "{col}" TEXT DEFAULT ""')
-        except sqlite3.OperationalError:
-            pass
-    db_op("CREATE TABLE IF NOT EXISTS audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, "
-          "timestamp TEXT, rig_name TEXT, action TEXT, assigned_to TEXT, notes TEXT)")
+        db_op(f"""ALTER TABLE fleet ADD COLUMN IF NOT EXISTS "{col}" TEXT DEFAULT ''""")
+    db_op('CREATE TABLE IF NOT EXISTS audit_log (id SERIAL PRIMARY KEY, '
+          '"timestamp" TEXT, rig_name TEXT, action TEXT, assigned_to TEXT, notes TEXT)')
+    return True
 
 
 def log_action(rig, action, assigned="", notes="", timestamp=None):
-    db_op("INSERT INTO audit_log (timestamp, rig_name, action, assigned_to, notes) VALUES (?,?,?,?,?)",
+    db_op('INSERT INTO audit_log ("timestamp", rig_name, action, assigned_to, notes) '
+          "VALUES (%s,%s,%s,%s,%s)",
           (timestamp or now(), rig, action, assigned, notes))
 
 
 def fetch_fleet():
-    existing = fleet_columns()
-    valid = [c for c in COLUMNS if c in existing] or ["rig_name", "status"]
-    df = db_op(f"SELECT {quoted(valid)} FROM fleet ORDER BY rig_name", fetch="df")
+    df = db_op(f"SELECT {quoted(COLUMNS)} FROM fleet ORDER BY rig_name", fetch="df")
     for col in COLUMNS:
         if col not in df:
             df[col] = ""
-    return df
+    return df.fillna("")
 
 
 def update_rig(rig, data):
+    data = {k: clean(v) for k, v in data.items()}
     data.setdefault("last_updated", now())
-    assignments = ", ".join(f'"{k}"=?' for k in data)
-    db_op(f"UPDATE fleet SET {assignments} WHERE rig_name=?", [*data.values(), rig])
+    assignments = ", ".join(f'"{k}"=%s' for k in data)
+    db_op(f"UPDATE fleet SET {assignments} WHERE rig_name=%s", [*data.values(), rig])
 
 
 def rig_names(where=""):
@@ -159,18 +256,28 @@ def cell(row, header):
 def import_fleet_csv(upload):
     df_in = pd.read_csv(upload).loc[:, lambda d: ~d.columns.duplicated()]
     name_col = "Rig Name" if "Rig Name" in df_in.columns else df_in.columns[0]
-    added = 0
+
+    rows, cols = [], None
     for _, row in df_in.iterrows():
         rig = str(row.get(name_col, "")).strip()
         if not rig or rig.lower() == "nan":
             continue
-        payload = {"status": "Available", **{k: cell(row, header) for k, header in CSV_MAP.items()}}
+        payload = {"status": "Available", **{k: cell(row, header) for k, header in CSV_MAP.items()},
+                   "last_updated": now()}
         cols = ["rig_name", *payload]
-        db_op(f"INSERT OR REPLACE INTO fleet ({quoted(cols)}) VALUES ({','.join('?' * len(cols))})",
-              [rig, *payload.values()])
-        added += 1
-    log_action("Bulk Import", f"CSV processed, {added} rigs imported")
-    flash(f"Successfully imported {added} rigs.")
+        rows.append([rig, *payload.values()])
+
+    if not rows:
+        st.warning("No rigs found in that CSV. Check that the first column holds rig names.")
+        return
+
+    placeholders = ",".join(["%s"] * len(cols))
+    updates = ", ".join(f'"{c}"=EXCLUDED."{c}"' for c in cols if c != "rig_name")
+    db_many(f"INSERT INTO fleet ({quoted(cols)}) VALUES ({placeholders}) "
+            f"ON CONFLICT (rig_name) DO UPDATE SET {updates}", rows)
+
+    log_action("Bulk Import", f"CSV processed, {len(rows)} rigs imported")
+    flash(f"Successfully imported {len(rows)} rigs.")
 
 
 def admin_sidebar():
@@ -189,8 +296,8 @@ def admin_sidebar():
         new_rig = st.text_input("New Rig Name").strip()
         if st.button("Add Rig") and new_rig:
             try:
-                db_op("INSERT INTO fleet (rig_name, status) VALUES (?, 'Available')", (new_rig,))
-            except sqlite3.IntegrityError:
+                db_op("INSERT INTO fleet (rig_name, status) VALUES (%s, 'Available')", (new_rig,))
+            except psycopg2.IntegrityError:
                 st.sidebar.error("Rig already exists.")
             else:
                 log_action(new_rig, "Rig Added to Database")
@@ -203,7 +310,7 @@ def admin_sidebar():
         else:
             del_rig = st.selectbox("Select Rig to Delete", all_rigs)
             if st.button("Delete Rig"):
-                db_op("DELETE FROM fleet WHERE rig_name=?", (del_rig,))
+                db_op("DELETE FROM fleet WHERE rig_name=%s", (del_rig,))
                 log_action(del_rig, "Rig Deleted from Database")
                 flash(f"Deleted {del_rig} from inventory.")
 
@@ -378,23 +485,31 @@ def import_audit_csv(upload):
             audit[col] = ""
     audit = audit[AUDIT_COLS].fillna("").sort_values("timestamp")
 
-    records, rigs = 0, set()
+    log_rows, latest = [], {}
     for _, row in audit.iterrows():
         rig = str(row["rig_name"]).strip()
         if not rig:
             continue
         timestamp, action, assigned, notes = (str(row[c]) for c in AUDIT_COLS[:1] + AUDIT_COLS[2:])
-        log_action(rig, action, assigned, notes, timestamp=timestamp)
-        records += 1
-        rigs.add(rig)
+        log_rows.append((timestamp, rig, action, assigned, notes))
 
         status = status_from_action(action)
         if status:
-            db_op("INSERT OR IGNORE INTO fleet (rig_name, status) VALUES (?, 'Available')", (rig,))
-            update_rig(rig, {"status": status,
-                             "assigned_to": "" if status == "Available" else assigned,
-                             "last_updated": timestamp})
-    flash(f"Successfully imported {records} records and synced {len(rigs)} rigs!")
+            # rows are in timestamp order, so the last one wins
+            latest[rig] = (status, "" if status == "Available" else assigned, timestamp)
+
+    db_many('INSERT INTO audit_log ("timestamp", rig_name, action, assigned_to, notes) '
+            "VALUES (%s,%s,%s,%s,%s)", log_rows)
+
+    if latest:
+        db_many("INSERT INTO fleet (rig_name, status) VALUES (%s, 'Available') "
+                "ON CONFLICT (rig_name) DO NOTHING", [(rig,) for rig in latest])
+        db_many('UPDATE fleet SET status=%s, assigned_to=%s, last_updated=%s WHERE rig_name=%s',
+                [(status, assigned, timestamp, rig)
+                 for rig, (status, assigned, timestamp) in latest.items()])
+
+    rigs = {row[1] for row in log_rows}
+    flash(f"Successfully imported {len(log_rows)} records and synced {len(rigs)} rigs!")
 
 
 def history_tab():
@@ -408,8 +523,9 @@ def history_tab():
             except Exception as err:
                 st.error(f"Error reading CSV file: {err}")
 
-    log_df = db_op('SELECT timestamp as Timestamp, rig_name as "Rig Name", action as Action, '
-                   'assigned_to as "Assigned To", notes as Notes FROM audit_log ORDER BY id DESC', fetch="df")
+    log_df = db_op('SELECT "timestamp" AS "Timestamp", rig_name AS "Rig Name", action AS "Action", '
+                   'assigned_to AS "Assigned To", notes AS "Notes" FROM audit_log ORDER BY id DESC',
+                   fetch="df")
     if log_df.empty:
         st.info("No actions have been logged yet.")
         return
