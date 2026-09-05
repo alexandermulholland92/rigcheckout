@@ -47,14 +47,20 @@ CHECKLIST = [
 
 YES_NO_LABELS = [COLUMNS[key] for key, _, _ in CHECKLIST] + ["Home WiFi", "Overnight Charge"]
 
-# Every form widget carries an explicit key so its value survives a rerun. These lists are what
-# each form wipes after a *successful* submit; a failed submit leaves the entries in place.
-CHECKOUT_KEYS = (["co_rig"]
-                 + [f"co_{key}" for key, _, _ in TEXT_FIELDS]
-                 + [f"co_{key}" for key, _, _ in CHECKLIST]
-                 + ["co_home_wifi", "co_overnight", "co_due_date", "co_due_time"])
-RETURN_KEYS = ["rt_rig", "rt_notes"]
-SERVICE_KEYS = ["sv_rig", "sv_status", "sv_notes"]
+SERVICE_STATUSES = ["Needs Servicing", "Available"]
+
+# Every form widget carries an explicit key so its value survives a rerun. These maps hold each
+# widget's default, which is what the form is reset to after a *successful* submit; a failed
+# submit leaves the entries alone. Each default must match the widget's own default below.
+CHECKOUT_DEFAULTS = {"co_rig": "",
+                     **{f"co_{key}": "" for key, _, _ in TEXT_FIELDS},
+                     **{f"co_{key}": "" for key, _, _ in CHECKLIST},
+                     "co_home_wifi": "", "co_overnight": "",
+                     "co_due_date": None, "co_due_time": None}
+# rt_rig is deliberately absent: a returned rig drops out of the deployed list, and Streamlit
+# resets a selectbox whose value is no longer among its options.
+RETURN_DEFAULTS = {"rt_notes": ""}
+SERVICE_DEFAULTS = {"sv_rig": "", "sv_status": SERVICE_STATUSES[0], "sv_notes": ""}
 
 # db column -> header in the bulk-import fleet CSV
 CSV_MAP = {
@@ -211,28 +217,20 @@ def flash(message):
     safe_rerun()
 
 
-def clear_form_fields(flag, keys):
-    """Blank a form's widgets if its last submit succeeded.
+def reset_form_fields(flag, defaults):
+    """Return a form's widgets to their defaults if its last submit succeeded.
 
-    Streamlit won't let us reset a widget's stored value once the widget has been drawn, so a
-    successful submit only raises `flag` and reruns. This runs at the top of the tab, before the
-    widgets exist, and drops their values so they come back at their defaults. A failed submit
-    never raises the flag, so what the user typed is still there to correct.
+    Streamlit won't let us touch a widget's value once the widget has been drawn, so a successful
+    submit only raises `flag` and reruns; this runs at the top of the tab, before the widgets
+    exist. A failed submit never raises the flag, so what the user typed is still there to correct.
+
+    Assign the defaults rather than deleting the keys. Deleting clears the value on the server but
+    leaves the browser showing what the user typed: Streamlit only tells the browser to adopt a
+    value when the key was *assigned* during the run, so a deleted field stays filled on screen.
     """
     if st.session_state.pop(flag, False):
-        for key in keys:
-            st.session_state.pop(key, None)
-
-
-def prune_stale_choice(key, options):
-    """Forget a remembered selection whose option has since disappeared.
-
-    The rig lists come from the database on every rerun, so a rig held in a selectbox can be
-    deployed or serviced by someone else in the meantime. Streamlit raises if a stored value is
-    missing from the options, so drop it and let the selectbox fall back to its default.
-    """
-    if key in st.session_state and st.session_state[key] not in options:
-        del st.session_state[key]
+        for key, default in defaults.items():
+            st.session_state[key] = default
 
 
 def fleet_columns():
@@ -366,19 +364,16 @@ def admin_sidebar():
 # --- tabs ------------------------------------------------------------------
 def checkout_tab():
     st.subheader("Deploy Hardware")
-    clear_form_fields("checkout_submitted", CHECKOUT_KEYS)
+    reset_form_fields("checkout_submitted", CHECKOUT_DEFAULTS)
     available = rig_names("status='Available'")
     if not available:
         st.info("No rigs currently available in the system. "
                 "Use the Admin controls to add hardware or import your CSV list.")
         return
 
-    rig_options = [""] + available
-    prune_stale_choice("co_rig", rig_options)
-
     with st.form("checkout_form"):
         st.caption("Please fill out all required text fields and checklist items to deploy a rig.")
-        rig = st.selectbox("Select Rig", rig_options, key="co_rig")
+        rig = st.selectbox("Select Rig", [""] + available, key="co_rig")
 
         cols = st.columns(2)
         texts = {key: cols[i].text_input(label, key=f"co_{key}") for key, label, i in TEXT_FIELDS}
@@ -466,13 +461,11 @@ def dashboard_tab(is_admin):
 
 def return_tab():
     st.subheader("Return Hardware")
-    clear_form_fields("return_submitted", RETURN_KEYS)
+    reset_form_fields("return_submitted", RETURN_DEFAULTS)
     deployed = rig_names("status='Deployed'")
     if not deployed:
         st.info("No rigs are currently marked as deployed.")
         return
-
-    prune_stale_choice("rt_rig", deployed)
 
     with st.form("return_form"):
         rig = st.selectbox("Select Rig to Return", deployed, key="rt_rig")
@@ -489,18 +482,15 @@ def servicing_tab():
     st.subheader("Mark Rig for Servicing")
     st.write("Use this section to flag an available rig that needs maintenance, "
              "or mark a serviced rig as available again.")
-    clear_form_fields("service_submitted", SERVICE_KEYS)
+    reset_form_fields("service_submitted", SERVICE_DEFAULTS)
     rigs = rig_names("status IN ('Available', 'Needs Servicing')")
     if not rigs:
         st.info("No available rigs to report.")
         return
 
-    rig_options = [""] + rigs
-    prune_stale_choice("sv_rig", rig_options)
-
     with st.form("service_form"):
-        rig = st.selectbox("Select Rig", rig_options, key="sv_rig")
-        status = st.selectbox("Update Status", ["Needs Servicing", "Available"], key="sv_status")
+        rig = st.selectbox("Select Rig", [""] + rigs, key="sv_rig")
+        status = st.selectbox("Update Status", SERVICE_STATUSES, key="sv_status")
         notes = st.text_area("Service / Damage Notes (Required)", key="sv_notes")
         if st.form_submit_button("Update Status"):
             problems = []
