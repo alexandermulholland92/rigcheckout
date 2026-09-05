@@ -47,6 +47,15 @@ CHECKLIST = [
 
 YES_NO_LABELS = [COLUMNS[key] for key, _, _ in CHECKLIST] + ["Home WiFi", "Overnight Charge"]
 
+# Every form widget carries an explicit key so its value survives a rerun. These lists are what
+# each form wipes after a *successful* submit; a failed submit leaves the entries in place.
+CHECKOUT_KEYS = (["co_rig"]
+                 + [f"co_{key}" for key, _, _ in TEXT_FIELDS]
+                 + [f"co_{key}" for key, _, _ in CHECKLIST]
+                 + ["co_home_wifi", "co_overnight", "co_due_date", "co_due_time"])
+RETURN_KEYS = ["rt_rig", "rt_notes"]
+SERVICE_KEYS = ["sv_rig", "sv_status", "sv_notes"]
+
 # db column -> header in the bulk-import fleet CSV
 CSV_MAP = {
     "assigned_to": "Column 1",
@@ -202,6 +211,30 @@ def flash(message):
     safe_rerun()
 
 
+def clear_form_fields(flag, keys):
+    """Blank a form's widgets if its last submit succeeded.
+
+    Streamlit won't let us reset a widget's stored value once the widget has been drawn, so a
+    successful submit only raises `flag` and reruns. This runs at the top of the tab, before the
+    widgets exist, and drops their values so they come back at their defaults. A failed submit
+    never raises the flag, so what the user typed is still there to correct.
+    """
+    if st.session_state.pop(flag, False):
+        for key in keys:
+            st.session_state.pop(key, None)
+
+
+def prune_stale_choice(key, options):
+    """Forget a remembered selection whose option has since disappeared.
+
+    The rig lists come from the database on every rerun, so a rig held in a selectbox can be
+    deployed or serviced by someone else in the meantime. Streamlit raises if a stored value is
+    missing from the options, so drop it and let the selectbox fall back to its default.
+    """
+    if key in st.session_state and st.session_state[key] not in options:
+        del st.session_state[key]
+
+
 def fleet_columns():
     rows = db_op("SELECT column_name FROM information_schema.columns "
                  "WHERE table_schema = current_schema() AND table_name = 'fleet'", fetch="all")
@@ -333,49 +366,55 @@ def admin_sidebar():
 # --- tabs ------------------------------------------------------------------
 def checkout_tab():
     st.subheader("Deploy Hardware")
+    clear_form_fields("checkout_submitted", CHECKOUT_KEYS)
     available = rig_names("status='Available'")
     if not available:
         st.info("No rigs currently available in the system. "
                 "Use the Admin controls to add hardware or import your CSV list.")
         return
 
-    with st.form("checkout_form", clear_on_submit=True):
+    rig_options = [""] + available
+    prune_stale_choice("co_rig", rig_options)
+
+    with st.form("checkout_form"):
         st.caption("Please fill out all required text fields and checklist items to deploy a rig.")
-        rig = st.selectbox("Select Rig", [""] + available)
+        rig = st.selectbox("Select Rig", rig_options, key="co_rig")
 
         cols = st.columns(2)
-        texts = {key: cols[i].text_input(label) for key, label, i in TEXT_FIELDS}
+        texts = {key: cols[i].text_input(label, key=f"co_{key}") for key, label, i in TEXT_FIELDS}
 
         st.write("---")
         st.caption("Safety & Technical Checklist (Required)")
         cols = st.columns(3)
-        checks = {key: cols[i % 3].selectbox(label, YES_NO)
+        checks = {key: cols[i % 3].selectbox(label, YES_NO, key=f"co_{key}")
                   for i, (key, label, _) in enumerate(CHECKLIST)}
 
         st.write("---")
         st.caption("Additional Details & Timing (Optional)")
         left, right = st.columns(2)
-        home_wifi = left.selectbox("Reliable WiFi/Ethernet at home?", YES_NO)
-        overnight = right.selectbox("Can charge/upload overnight?", YES_NO)
+        home_wifi = left.selectbox("Reliable WiFi/Ethernet at home?", YES_NO, key="co_home_wifi")
+        overnight = right.selectbox("Can charge/upload overnight?", YES_NO, key="co_overnight")
 
         date_col, time_col = st.columns(2)
-        due_date = date_col.date_input("Estimated Return Date", value=None)
-        due_time = time_col.time_input("Estimated Return Time", value=None)
+        due_date = date_col.date_input("Estimated Return Date", value=None, key="co_due_date")
+        due_time = time_col.time_input("Estimated Return Time", value=None, key="co_due_time")
 
         if not st.form_submit_button("Check Out"):
             return
 
     missing_text = [label for key, label, _ in TEXT_FIELDS if not texts[key].strip()]
     missing_checks = [label for key, label, _ in CHECKLIST if not checks[key]]
+    problems = []
     if not rig:
-        st.error("Submission Failed: Please select a rig to deploy.")
-        return
+        problems.append("Please select a rig to deploy.")
     if missing_text:
-        st.error(f"Submission Failed: The following text fields are required: {', '.join(missing_text)}")
-        return
+        problems.append(f"The following text fields are required: {', '.join(missing_text)}")
     if missing_checks:
-        st.error("Submission Failed: Please select an option for the following checklist questions: "
-                 f"{', '.join(missing_checks)}")
+        problems.append("Please select an option for the following checklist questions: "
+                        f"{', '.join(missing_checks)}")
+    if problems:
+        # Everything already entered is still in the form above, so list every problem at once.
+        st.error("Submission Failed:\n" + "\n".join(f"- {problem}" for problem in problems))
         return
 
     eta = " at ".join(part for part in (due_date.strftime("%Y-%m-%d") if due_date else "",
@@ -390,6 +429,7 @@ def checkout_tab():
 
     update_rig(rig, payload)
     log_action(rig, "Deployed", payload["assigned_to"], notes)
+    st.session_state.checkout_submitted = True
     flash(f"🎉 **{rig}** was successfully deployed to **{payload['assigned_to']}**!"
           + (f" (Expected Return: {eta})" if eta else ""))
 
@@ -426,18 +466,22 @@ def dashboard_tab(is_admin):
 
 def return_tab():
     st.subheader("Return Hardware")
+    clear_form_fields("return_submitted", RETURN_KEYS)
     deployed = rig_names("status='Deployed'")
     if not deployed:
         st.info("No rigs are currently marked as deployed.")
         return
 
-    with st.form("return_form", clear_on_submit=True):
-        rig = st.selectbox("Select Rig to Return", deployed)
-        notes = st.text_area("Return Notes / Damage Report (Optional)")
+    prune_stale_choice("rt_rig", deployed)
+
+    with st.form("return_form"):
+        rig = st.selectbox("Select Rig to Return", deployed, key="rt_rig")
+        notes = st.text_area("Return Notes / Damage Report (Optional)", key="rt_notes")
         if st.form_submit_button("Return Rig"):
             cleared = {k: "" for k in COLUMNS if k not in ("rig_name", "last_updated")}
             update_rig(rig, {**cleared, "status": "Available", "damage_notes": notes})
             log_action(rig, "Returned", "", notes)
+            st.session_state.return_submitted = True
             flash(f"✅ **{rig}** has been returned and is now Available.")
 
 
@@ -445,23 +489,31 @@ def servicing_tab():
     st.subheader("Mark Rig for Servicing")
     st.write("Use this section to flag an available rig that needs maintenance, "
              "or mark a serviced rig as available again.")
+    clear_form_fields("service_submitted", SERVICE_KEYS)
     rigs = rig_names("status IN ('Available', 'Needs Servicing')")
     if not rigs:
         st.info("No available rigs to report.")
         return
 
-    with st.form("service_form", clear_on_submit=True):
-        rig = st.selectbox("Select Rig", [""] + rigs)
-        status = st.selectbox("Update Status", ["Needs Servicing", "Available"])
-        notes = st.text_area("Service / Damage Notes (Required)")
+    rig_options = [""] + rigs
+    prune_stale_choice("sv_rig", rig_options)
+
+    with st.form("service_form"):
+        rig = st.selectbox("Select Rig", rig_options, key="sv_rig")
+        status = st.selectbox("Update Status", ["Needs Servicing", "Available"], key="sv_status")
+        notes = st.text_area("Service / Damage Notes (Required)", key="sv_notes")
         if st.form_submit_button("Update Status"):
+            problems = []
             if not rig:
-                st.error("Submission Failed: Please select a rig.")
-            elif not notes.strip():
-                st.error("Submission Failed: 'Service / Damage Notes' is required.")
+                problems.append("Please select a rig.")
+            if not notes.strip():
+                problems.append("'Service / Damage Notes' is required.")
+            if problems:
+                st.error("Submission Failed:\n" + "\n".join(f"- {problem}" for problem in problems))
             else:
                 update_rig(rig, {"status": status, "damage_notes": notes.strip()})
                 log_action(rig, f"Status updated to {status}", "", notes.strip())
+                st.session_state.service_submitted = True
                 flash(f"✅ **{rig}** status successfully updated to **{status}**.")
 
 
